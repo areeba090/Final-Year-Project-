@@ -34,7 +34,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
 
   String? _selectedSchool;
   String? _selectedRoute;
-  bool _rideOn = false;
+  final Set<String> _childrenOnRide = {};
 
   @override
   void dispose() {
@@ -221,7 +221,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
         ListTile(
           leading: CircleAvatar(backgroundImage: d['profilePic'] != null ? NetworkImage(d['profilePic']) : null),
           title: Text(d['name'] ?? 'Driver'),
-          subtitle: Text(_rideOn ? 'On Ride' : 'Offline'),
+          subtitle: Text(_childrenOnRide.isNotEmpty ? 'On Ride' : 'Offline'),
         ),
         ListTile(title: Text('CNIC: ${d['cnic'] ?? ''}')),
         ListTile(title: Text('License: ${d['licenseNumber'] ?? ''}')),
@@ -304,6 +304,8 @@ class _DriverDashboardState extends State<DriverDashboard> {
                   return Column(
                     children: assignedChildren.map((child) {
                       final picUrl = child['photo'] ?? '';
+                      final childId = child['id'] as String? ?? '';
+                      final isChildOnRide = _childrenOnRide.contains(childId);
                       return Card(
                         margin: const EdgeInsets.symmetric(vertical: 8),
                         child: Padding(
@@ -361,22 +363,33 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                   const SizedBox(width: 8),
                                   ElevatedButton(
                                     onPressed: () async {
-                                      final newRideOn = !_rideOn;
+                                      final newRideOn = !isChildOnRide;
                                       final childName = child['name'] ?? 'your child';
                                       await _sendRideNotificationToParent(
                                         type: newRideOn ? 'ride_started' : 'ride_ended',
                                         parentId: parentId as String,
                                         childName: childName,
                                       );
-                                      setState(() => _rideOn = newRideOn);
-                                      if (_rideOn) GPSController.startTracking(_user.uid);
-                                      else GPSController.stopTracking();
+                                      setState(() {
+                                        if (newRideOn) {
+                                          _childrenOnRide.add(childId);
+                                        } else {
+                                          _childrenOnRide.remove(childId);
+                                        }
+                                      });
+                                      if (_childrenOnRide.isNotEmpty) {
+                                        GPSController.startTracking(_user.uid);
+                                      } else {
+                                        GPSController.stopTracking();
+                                      }
                                       await _firestore.collection('users').doc(_user.uid).set({
-                                        'rideStatus': _rideOn ? 'on' : 'off',
+                                        'rideStatus': _childrenOnRide.isNotEmpty ? 'on' : 'off',
                                       }, SetOptions(merge: true));
                                     },
-                                    style: ElevatedButton.styleFrom(backgroundColor: _rideOn ? Colors.red : Colors.green),
-                                    child: Text(_rideOn ? 'Stop Ride' : 'Start Ride'),
+                                    style: ElevatedButton.styleFrom(
+                                      backgroundColor: isChildOnRide ? Colors.red : Colors.green,
+                                    ),
+                                    child: Text(isChildOnRide ? 'Stop Ride' : 'Start Ride'),
                                   ),
                                 ],
                               ),

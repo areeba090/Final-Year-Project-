@@ -24,10 +24,15 @@ class _ParentDashboardState extends State<ParentDashboard> {
   int _selectedIndex = 2;
   final Set<String> _shownNotificationIds = {};
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _notifSub;
+  bool _requestedWebNotificationPermission = false;
 
   @override
   void initState() {
     super.initState();
+    if (kIsWeb && !_requestedWebNotificationPermission) {
+      _requestedWebNotificationPermission = true;
+      requestNotificationPermission();
+    }
     _listenForRideNotifications();
   }
 
