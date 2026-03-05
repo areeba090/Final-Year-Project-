@@ -266,7 +266,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
   // ================= Assigned Children Tab FIXED =================
   Widget _assignedChildren() {
     return StreamBuilder<QuerySnapshot>(
-      stream: _firestore.collection('driver_requests')
+      stream: _firestore.collection('requests')
           .where('driverId', isEqualTo: _user.uid)
           .where('status', isEqualTo: 'approved')
           .snapshots(),
@@ -276,13 +276,17 @@ class _DriverDashboardState extends State<DriverDashboard> {
 
         if (driverRequests.isEmpty) return const Center(child: Text('No children assigned yet.'));
 
+        // Deduplicate by parent so same child is not shown multiple times (e.g. duplicate requests)
+        final uniqueParentIds = driverRequests
+            .map((d) => (d.data() as Map<String, dynamic>)['parentId'] as String?)
+            .whereType<String>()
+            .toSet()
+            .toList();
+
         return SingleChildScrollView(
           padding: const EdgeInsets.all(16),
           child: Column(
-            children: driverRequests.map((reqDoc) {
-              final reqData = reqDoc.data() as Map<String, dynamic>;
-              final parentId = reqData['parentId'];
-
+            children: uniqueParentIds.map((parentId) {
               return FutureBuilder<DocumentSnapshot>(
                 future: _firestore.collection('users').doc(parentId).get(),
                 builder: (context, parentSnap) {
@@ -290,13 +294,9 @@ class _DriverDashboardState extends State<DriverDashboard> {
                   final parentData = parentSnap.data!.data() as Map<String, dynamic>? ?? {};
                   final children = parentData['children'] as List<dynamic>? ?? [];
 
-                  // ==== FIX: assigned children show even if routeId missing ====
                   final assignedChildren = children.where((c) {
                     if (c['assignedDriver'] != _user.uid) return false;
-                    if (c['routeId'] != null && reqData['routeId'] != null) {
-                      return c['routeId'] == reqData['routeId'];
-                    }
-                    return true; // show if routeId missing
+                    return true;
                   }).toList();
 
                   if (assignedChildren.isEmpty) return const SizedBox();

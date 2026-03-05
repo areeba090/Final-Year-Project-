@@ -2,8 +2,11 @@ import React, { useEffect, useState } from "react";
 import { db, auth } from "../firebase";
 import { collection, getDocs, addDoc, deleteDoc, doc } from "firebase/firestore";
 import { createUserWithEmailAndPassword, signOut } from "firebase/auth";
+import DeleteConfirmModal from "../components/DeleteConfirmModal";
+import { useToast } from "../contexts/ToastContext";
 
 const SuperAdminDashboard = () => {
+  const { success, error } = useToast();
   const [activeTab, setActiveTab] = useState("dashboard");
   const [admins, setAdmins] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -12,6 +15,8 @@ const SuperAdminDashboard = () => {
   const [newAdminCity, setNewAdminCity] = useState("Abbottabad");
   const [adding, setAdding] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [deleteModal, setDeleteModal] = useState({ open: false, admin: null });
+  const [deleting, setDeleting] = useState(false);
 
   useEffect(() => {
     const fetchAdmins = async () => {
@@ -39,7 +44,10 @@ const SuperAdminDashboard = () => {
   }, []);
 
   const handleAddAdmin = async () => {
-    if (!newAdminEmail || !newAdminPassword) return alert("Enter email & password!");
+    if (!newAdminEmail || !newAdminPassword) {
+      error("Enter email and password.");
+      return;
+    }
     setAdding(true);
     try {
       const userCredential = await createUserWithEmailAndPassword(auth, newAdminEmail, newAdminPassword);
@@ -67,22 +75,30 @@ const SuperAdminDashboard = () => {
       setNewAdminEmail("");
       setNewAdminPassword("");
       setNewAdminCity("Abbottabad");
-      alert("Admin added successfully!");
+      success("Admin added successfully!");
     } catch (err) {
-      alert(err.code === "auth/email-already-in-use" ? "Email already registered." : err.message);
+      error(err.code === "auth/email-already-in-use" ? "Email already registered." : err.message);
     } finally {
       setAdding(false);
     }
   };
 
-  const handleRemoveAdmin = async (id) => {
-    if (!window.confirm("Are you sure you want to remove this admin?")) return;
+  const handleRemoveAdminClick = (admin) => {
+    setDeleteModal({ open: true, admin });
+  };
+
+  const handleConfirmDeleteAdmin = async () => {
+    if (!deleteModal.admin) return;
+    setDeleting(true);
     try {
-      await deleteDoc(doc(db, "users", id));
-      setAdmins(prev => prev.filter(admin => admin.id !== id));
-      alert("Admin removed successfully");
+      await deleteDoc(doc(db, "users", deleteModal.admin.id));
+      setAdmins(prev => prev.filter(admin => admin.id !== deleteModal.admin.id));
+      success("Admin removed successfully.");
+      setDeleteModal({ open: false, admin: null });
     } catch (err) {
-      console.error("Error removing admin:", err);
+      error("Failed to remove admin. Please try again.");
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -374,7 +390,7 @@ const SuperAdminDashboard = () => {
                       </td>
                       <td className="py-4 px-6">
                         <button
-                          onClick={() => handleRemoveAdmin(admin.id)}
+                          onClick={() => handleRemoveAdminClick(admin)}
                           className="inline-flex items-center gap-1.5 bg-gradient-to-r from-red-500 to-rose-600 text-white px-4 py-2 rounded-lg hover:from-red-600 hover:to-rose-700 transition-all duration-300 shadow-md hover:shadow-lg transform hover:-translate-y-0.5 font-medium"
                         >
                           <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -425,6 +441,17 @@ const SuperAdminDashboard = () => {
         )}
 
       </div>
+
+      <DeleteConfirmModal
+        isOpen={deleteModal.open}
+        onClose={() => !deleting && setDeleteModal({ open: false, admin: null })}
+        onConfirm={handleConfirmDeleteAdmin}
+        title="Remove admin"
+        description="This admin will lose access. This action cannot be undone."
+        itemName={deleteModal.admin?.email}
+        confirmLabel="Remove admin"
+        isLoading={deleting}
+      />
     </div>
   );
 };

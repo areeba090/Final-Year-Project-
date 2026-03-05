@@ -12,10 +12,17 @@ import {
   getDoc,
 } from "firebase/firestore";
 import { signOut } from "firebase/auth";
+import DeleteConfirmModal from "../components/DeleteConfirmModal";
+import AddSchoolMapModal from "../components/AddSchoolMapModal";
+import AddRouteModal from "../components/AddRouteModal";
+import { useToast } from "../contexts/ToastContext";
 
 const AdminDashboard = () => {
+  const { success, error } = useToast();
   const [activeTab, setActiveTab] = useState("dashboard");
   const [collapsed, setCollapsed] = useState(false);
+  const [deleteModal, setDeleteModal] = useState({ open: false, type: null, id: null, name: null });
+  const [deleting, setDeleting] = useState(false);
 
   const [drivers, setDrivers] = useState([]);
   const [parents, setParents] = useState([]);
@@ -25,9 +32,6 @@ const AdminDashboard = () => {
   const [selectedDriver, setSelectedDriver] = useState(null);
   const [selectedParent, setSelectedParent] = useState(null);
   const [parentChildren, setParentChildren] = useState([]);
-
-  const [newRoute, setNewRoute] = useState("");
-  const [newSchool, setNewSchool] = useState("");
 
   const [adminProfile, setAdminProfile] = useState({
     name: "",
@@ -40,6 +44,8 @@ const AdminDashboard = () => {
   const [savingProfile, setSavingProfile] = useState(false);
   const [addingRoute, setAddingRoute] = useState(false);
   const [addingSchool, setAddingSchool] = useState(false);
+  const [addSchoolMapOpen, setAddSchoolMapOpen] = useState(false);
+  const [addRouteModalOpen, setAddRouteModalOpen] = useState(false);
 
   // Live driver location for map
   const [selectedDriverLocation, setSelectedDriverLocation] = useState(null);
@@ -124,11 +130,11 @@ const AdminDashboard = () => {
     try {
       const adminRef = doc(db, "users", auth.currentUser.uid);
       await updateDoc(adminRef, adminProfile);
-      setSavingProfile(false);
-      alert("Profile saved!");
+      success("Profile saved!");
     } catch (e) {
+      error("Failed to save profile.");
+    } finally {
       setSavingProfile(false);
-      alert("Failed to save profile.");
     }
   };
 
@@ -176,28 +182,68 @@ const AdminDashboard = () => {
     const driverSnap = await getDoc(driverRef);
     const driverData = driverSnap.data();
     if (!driverData.route || !driverData.school) {
-      alert("Assign route and school before approving.");
+      error("Assign route and school before approving.");
       return;
     }
-    await updateDoc(driverRef, {
-      status: "active",
-      assignedSeats: 0,
-      availableSeats: driverData.seats || 0,
-    });
+    try {
+      await updateDoc(driverRef, {
+        status: "active",
+        assignedSeats: 0,
+        availableSeats: driverData.seats || 0,
+      });
+      success("Driver approved.");
+    } catch (e) {
+      error("Failed to approve driver.");
+    }
   };
 
   const rejectDriver = async (id) => {
-    await updateDoc(doc(db, "users", id), { status: "rejected" });
+    try {
+      await updateDoc(doc(db, "users", id), { status: "rejected" });
+      success("Driver rejected.");
+    } catch (e) {
+      error("Failed to reject driver.");
+    }
   };
 
-  const removeDriver = async (id) => {
-    if (!window.confirm("Remove this driver?")) return;
-    await deleteDoc(doc(db, "users", id));
+  const openDeleteModal = (type, id, name) => {
+    setDeleteModal({ open: true, type, id, name });
   };
 
-  const removeParent = async (id) => {
-    if (!window.confirm("Remove this parent?")) return;
-    await deleteDoc(doc(db, "users", id));
+  const handleConfirmDelete = async () => {
+    if (!deleteModal.id || !deleteModal.type) return;
+    setDeleting(true);
+    try {
+      if (deleteModal.type === "driver" || deleteModal.type === "parent") {
+        await deleteDoc(doc(db, "users", deleteModal.id));
+      } else if (deleteModal.type === "route") {
+        await deleteDoc(doc(db, "routes", deleteModal.id));
+      } else if (deleteModal.type === "school") {
+        await deleteDoc(doc(db, "schools", deleteModal.id));
+      }
+      success(
+        deleteModal.type === "driver"
+          ? "Driver removed."
+          : deleteModal.type === "parent"
+            ? "Parent removed."
+            : deleteModal.type === "route"
+              ? "Route deleted."
+              : "School deleted."
+      );
+      setDeleteModal({ open: false, type: null, id: null, name: null });
+    } catch (e) {
+      error("Failed to delete. Please try again.");
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const removeDriver = (id, name) => {
+    openDeleteModal("driver", id, name || "this driver");
+  };
+
+  const removeParent = (id, name) => {
+    openDeleteModal("parent", id, name || "this parent");
   };
 
   const fetchChildren = (parent) => {
@@ -205,36 +251,54 @@ const AdminDashboard = () => {
     setParentChildren(children.map((c, index) => ({ id: index, ...c })));
   };
 
-  const addRoute = async () => {
-    if (!newRoute.trim()) return;
+  const addRouteFromModal = async (routeData) => {
     setAddingRoute(true);
     try {
-      await addDoc(collection(db, "routes"), { name: newRoute.trim() });
-      setNewRoute("");
+      const name = `${routeData.schoolName} → ${routeData.destinationName}`;
+      await addDoc(collection(db, "routes"), {
+        name,
+        schoolName: routeData.schoolName,
+        schoolLatitude: routeData.schoolLatitude,
+        schoolLongitude: routeData.schoolLongitude,
+        ...(routeData.schoolId && { schoolId: routeData.schoolId }),
+        destinationName: routeData.destinationName,
+        destinationLatitude: routeData.destinationLatitude,
+        destinationLongitude: routeData.destinationLongitude,
+        ...(routeData.destinationAddress && { destinationAddress: routeData.destinationAddress }),
+      });
+      success("Route added with school and destination.");
+      setAddRouteModalOpen(false);
+    } catch (e) {
+      error("Failed to add route.");
     } finally {
       setAddingRoute(false);
     }
   };
 
-  const deleteRoute = async (id) => {
-    if (!window.confirm("Delete this route?")) return;
-    await deleteDoc(doc(db, "routes", id));
+  const deleteRoute = (id, name) => {
+    openDeleteModal("route", id, name || "this route");
   };
 
-  const addSchool = async () => {
-    if (!newSchool.trim()) return;
+  const addSchoolFromMap = async (school) => {
     setAddingSchool(true);
     try {
-      await addDoc(collection(db, "schools"), { name: newSchool.trim() });
-      setNewSchool("");
+      await addDoc(collection(db, "schools"), {
+        name: school.name,
+        latitude: school.latitude,
+        longitude: school.longitude,
+        ...(school.address && { address: school.address }),
+      });
+      success("School added with location.");
+      setAddSchoolMapOpen(false);
+    } catch (e) {
+      error("Failed to add school.");
     } finally {
       setAddingSchool(false);
     }
   };
 
-  const deleteSchool = async (id) => {
-    if (!window.confirm("Delete this school?")) return;
-    await deleteDoc(doc(db, "schools", id));
+  const deleteSchool = (id, name) => {
+    openDeleteModal("school", id, name || "this school");
   };
 
   const logout = async () => {
@@ -260,32 +324,43 @@ const AdminDashboard = () => {
       parentName: parent.name || "Unknown Parent",
       driverId,
       childIds: [updatedChildren[childIndex].name],
-      status: "pending",
+      status: "approved",
       createdAt: new Date(),
     });
-    alert("Driver assigned and request added to pending.");
+    success("Driver assigned. They will see this child in their app.");
     fetchChildren({ ...parent, children: updatedChildren });
   };
 
   const approveRequest = async (req) => {
-    const parentRef = doc(db, "users", req.parentId);
-    const parentSnap = await getDoc(parentRef);
-    const parentData = parentSnap.data();
-    const updatedChildren = (parentData.children || []).map((child) =>
-      req.childIds?.includes(child.name)
-        ? { ...child, assignedDriver: req.driverId }
-        : child,
-    );
-    await updateDoc(doc(db, "requests", req.id), { status: "approved" });
-    await updateDoc(parentRef, { children: updatedChildren });
-    alert("Request approved.");
+    try {
+      const parentRef = doc(db, "users", req.parentId);
+      const parentSnap = await getDoc(parentRef);
+      const parentData = parentSnap.data();
+      const updatedChildren = (parentData.children || []).map((child) =>
+        req.childIds?.includes(child.name)
+          ? { ...child, assignedDriver: req.driverId }
+          : child,
+      );
+      await updateDoc(doc(db, "requests", req.id), { status: "approved" });
+      await updateDoc(parentRef, { children: updatedChildren });
+      success("Request approved.");
+    } catch (e) {
+      error("Failed to approve request.");
+    }
   };
 
   const rejectRequest = async (reqId) => {
-    await updateDoc(doc(db, "requests", reqId), { status: "rejected" });
+    try {
+      await updateDoc(doc(db, "requests", reqId), { status: "rejected" });
+      success("Request rejected.");
+    } catch (e) {
+      error("Failed to reject request.");
+    }
   };
 
-  const pendingDrivers = drivers.filter((d) => d.status === "pending");
+  const pendingDrivers = drivers.filter((d) =>
+    d.status === "pending" || d.status === "inactive"
+  );
   const verifiedDrivers = drivers.filter((d) => d.status === "active");
   const pendingRequests = allDriverRequests.filter(
     (r) => r.status === "pending",
@@ -775,23 +850,23 @@ const AdminDashboard = () => {
                   {pendingDrivers.map((driver) => (
                     <div
                       key={driver.id}
-                      className="bg-white rounded-2xl p-5 shadow-md border border-slate-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
+                      className="bg-white rounded-2xl p-4 sm:p-5 shadow-md border border-slate-100 flex flex-col gap-4 min-w-0 overflow-hidden"
                     >
-                      <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-700 font-bold text-lg">
+                      <div className="flex items-center gap-3 min-w-0">
+                        <div className="w-10 h-10 sm:w-12 sm:h-12 flex-shrink-0 bg-emerald-100 rounded-xl flex items-center justify-center text-emerald-700 font-bold text-lg">
                           {(driver.name || "D")[0]}
                         </div>
-                        <div>
-                          <p className="font-semibold text-slate-800">
+                        <div className="min-w-0 flex-1">
+                          <p className="font-semibold text-slate-800 truncate">
                             {driver.name || "—"}
                           </p>
-                          <p className="text-sm text-slate-500">
+                          <p className="text-sm text-slate-500 truncate">
                             {driver.phone || driver.email}
                           </p>
                         </div>
                       </div>
-                      <div className="flex flex-wrap items-center gap-3">
-                        <div className="flex flex-col sm:flex-row gap-2">
+                      <div className="flex flex-col sm:flex-row sm:flex-wrap gap-3 border-t border-slate-100 pt-4 sm:pt-0 sm:border-t-0">
+                        <div className="flex flex-col sm:flex-row gap-2 min-w-0">
                           <select
                             value={driver.route || ""}
                             onChange={async (e) => {
@@ -799,7 +874,7 @@ const AdminDashboard = () => {
                                 route: e.target.value,
                               });
                             }}
-                            className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-400"
+                            className="w-full min-w-0 sm:w-40 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-400 bg-white"
                           >
                             <option value="">Route</option>
                             {routes.map((r) => (
@@ -815,7 +890,7 @@ const AdminDashboard = () => {
                                 school: e.target.value,
                               });
                             }}
-                            className="px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-400"
+                            className="w-full min-w-0 sm:w-40 px-3 py-2 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-emerald-400 bg-white"
                           >
                             <option value="">School</option>
                             {schools.map((s) => (
@@ -825,16 +900,16 @@ const AdminDashboard = () => {
                             ))}
                           </select>
                         </div>
-                        <div className="flex gap-2">
+                        <div className="flex gap-2 flex-shrink-0">
                           <button
                             onClick={() => approveDriver(driver.id)}
-                            className="px-4 py-2 bg-emerald-500 text-white rounded-lg font-medium hover:bg-emerald-600 transition"
+                            className="flex-1 sm:flex-none px-4 py-2 bg-emerald-500 text-white rounded-lg font-medium hover:bg-emerald-600 transition text-sm whitespace-nowrap"
                           >
                             Approve
                           </button>
                           <button
                             onClick={() => rejectDriver(driver.id)}
-                            className="px-4 py-2 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 transition"
+                            className="flex-1 sm:flex-none px-4 py-2 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 transition text-sm whitespace-nowrap"
                           >
                             Reject
                           </button>
@@ -902,7 +977,7 @@ const AdminDashboard = () => {
                           Details
                         </button>
                         <button
-                          onClick={() => removeDriver(driver.id)}
+                          onClick={() => removeDriver(driver.id, driver.name)}
                           className="px-4 py-2 bg-red-50 text-red-600 rounded-lg font-medium hover:bg-red-100 transition"
                         >
                           Remove
@@ -1014,29 +1089,29 @@ const AdminDashboard = () => {
                   {pendingRequests.map((req) => (
                     <div
                       key={req.id}
-                      className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-wrap items-center justify-between gap-4"
+                      className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 min-w-0 overflow-hidden"
                     >
-                      <div>
-                        <p className="font-medium text-slate-800">
+                      <div className="min-w-0 flex-1">
+                        <p className="font-medium text-slate-800 truncate">
                           {req.parentName}
                         </p>
-                        <p className="text-sm text-slate-600">
+                        <p className="text-sm text-slate-600 break-words mt-0.5">
                           Driver:{" "}
                           {drivers.find((d) => d.id === req.driverId)?.name ||
                             "—"}{" "}
                           · Children: {req.childIds?.join(", ")}
                         </p>
                       </div>
-                      <div className="flex gap-2">
+                      <div className="flex gap-2 flex-shrink-0">
                         <button
                           onClick={() => approveRequest(req)}
-                          className="px-4 py-2 bg-emerald-500 text-white rounded-lg font-medium hover:bg-emerald-600 transition"
+                          className="flex-1 sm:flex-none px-4 py-2 bg-emerald-500 text-white rounded-lg font-medium hover:bg-emerald-600 transition text-sm whitespace-nowrap"
                         >
                           Approve
                         </button>
                         <button
                           onClick={() => rejectRequest(req.id)}
-                          className="px-4 py-2 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 transition"
+                          className="flex-1 sm:flex-none px-4 py-2 bg-red-500 text-white rounded-lg font-medium hover:bg-red-600 transition text-sm whitespace-nowrap"
                         >
                           Reject
                         </button>
@@ -1087,7 +1162,7 @@ const AdminDashboard = () => {
                             Children & assign driver
                           </button>
                           <button
-                            onClick={() => removeParent(parent.id)}
+                            onClick={() => removeParent(parent.id, parent.name)}
                             className="px-4 py-2 bg-red-50 text-red-600 rounded-lg font-medium hover:bg-red-100 transition"
                           >
                             Remove
@@ -1180,34 +1255,48 @@ const AdminDashboard = () => {
                 <h3 className="text-lg font-semibold text-slate-800 mb-4">
                   Routes
                 </h3>
-                <div className="flex gap-2 mb-4">
-                  <input
-                    value={newRoute}
-                    onChange={(e) => setNewRoute(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && addRoute()}
-                    className="flex-1 px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
-                    placeholder="New route name"
-                  />
+                <div className="mb-4">
                   <button
-                    onClick={addRoute}
-                    disabled={addingRoute || !newRoute.trim()}
-                    className="px-5 py-3 bg-emerald-500 text-white rounded-xl font-medium hover:bg-emerald-600 transition disabled:opacity-50"
+                    type="button"
+                    onClick={() => setAddRouteModalOpen(true)}
+                    className="w-full sm:w-auto px-5 py-3 bg-emerald-500 text-white rounded-xl font-medium hover:bg-emerald-600 transition flex items-center justify-center gap-2"
                   >
-                    {addingRoute ? "…" : "Add"}
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                    </svg>
+                    Add route (school → destination)
                   </button>
                 </div>
                 <ul className="space-y-2">
                   {routes.map((r) => (
                     <li
                       key={r.id}
-                      className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-50"
+                      className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-50 gap-2"
                     >
-                      <span className="font-medium text-slate-800">
-                        {r.name}
-                      </span>
+                      <div className="min-w-0 flex-1">
+                        <span className="font-medium text-slate-800 block truncate">
+                          {r.name}
+                        </span>
+                        {(r.schoolName != null || r.destinationName != null) && (
+                          <div className="text-xs text-slate-500 mt-0.5 space-y-0.5">
+                            {r.schoolName != null && (
+                              <span className="block truncate">
+                                School: {r.schoolName}
+                                {r.schoolLatitude != null && ` (${r.schoolLatitude.toFixed(4)}, ${r.schoolLongitude.toFixed(4)})`}
+                              </span>
+                            )}
+                            {r.destinationName != null && (
+                              <span className="block truncate">
+                                Destination: {r.destinationName}
+                                {r.destinationLatitude != null && ` (${r.destinationLatitude.toFixed(4)}, ${r.destinationLongitude.toFixed(4)})`}
+                              </span>
+                            )}
+                          </div>
+                        )}
+                      </div>
                       <button
-                        onClick={() => deleteRoute(r.id)}
-                        className="text-red-500 hover:text-red-700 text-sm font-medium"
+                        onClick={() => deleteRoute(r.id, r.name)}
+                        className="text-red-500 hover:text-red-700 text-sm font-medium flex-shrink-0"
                       >
                         Delete
                       </button>
@@ -1215,7 +1304,7 @@ const AdminDashboard = () => {
                   ))}
                   {routes.length === 0 && (
                     <li className="text-slate-500 text-sm py-2">
-                      No routes yet.
+                      No routes yet. Add a route by selecting a school and destination.
                     </li>
                   )}
                 </ul>
@@ -1225,34 +1314,37 @@ const AdminDashboard = () => {
                 <h3 className="text-lg font-semibold text-slate-800 mb-4">
                   Schools
                 </h3>
-                <div className="flex gap-2 mb-4">
-                  <input
-                    value={newSchool}
-                    onChange={(e) => setNewSchool(e.target.value)}
-                    onKeyDown={(e) => e.key === "Enter" && addSchool()}
-                    className="flex-1 px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400"
-                    placeholder="New school name"
-                  />
+                <div className="mb-4">
                   <button
-                    onClick={addSchool}
-                    disabled={addingSchool || !newSchool.trim()}
-                    className="px-5 py-3 bg-teal-500 text-white rounded-xl font-medium hover:bg-teal-600 transition disabled:opacity-50"
+                    type="button"
+                    onClick={() => setAddSchoolMapOpen(true)}
+                    className="w-full sm:w-auto px-5 py-3 bg-emerald-500 text-white rounded-xl font-medium hover:bg-emerald-600 transition flex items-center justify-center gap-2"
                   >
-                    {addingSchool ? "…" : "Add"}
+                    <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                    </svg>
+                    Add school from map
                   </button>
                 </div>
                 <ul className="space-y-2">
                   {schools.map((s) => (
                     <li
                       key={s.id}
-                      className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-50"
+                      className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-50 gap-2"
                     >
-                      <span className="font-medium text-slate-800">
-                        {s.name}
-                      </span>
+                      <div className="min-w-0 flex-1">
+                        <span className="font-medium text-slate-800 block truncate">
+                          {s.name}
+                        </span>
+                        {(s.latitude != null && s.longitude != null) && (
+                          <span className="text-xs text-slate-500">
+                            {s.latitude.toFixed(5)}, {s.longitude.toFixed(5)}
+                          </span>
+                        )}
+                      </div>
                       <button
-                        onClick={() => deleteSchool(s.id)}
-                        className="text-red-500 hover:text-red-700 text-sm font-medium"
+                        onClick={() => deleteSchool(s.id, s.name)}
+                        className="text-red-500 hover:text-red-700 text-sm font-medium flex-shrink-0"
                       >
                         Delete
                       </button>
@@ -1260,7 +1352,7 @@ const AdminDashboard = () => {
                   ))}
                   {schools.length === 0 && (
                     <li className="text-slate-500 text-sm py-2">
-                      No schools yet.
+                      No schools yet. Add a school from map above.
                     </li>
                   )}
                 </ul>
@@ -1371,6 +1463,42 @@ const AdminDashboard = () => {
           </div>
         )}
       </main>
+
+      <AddSchoolMapModal
+        isOpen={addSchoolMapOpen}
+        onClose={() => setAddSchoolMapOpen(false)}
+        onSelectSchool={addSchoolFromMap}
+        isAdding={addingSchool}
+      />
+
+      <AddRouteModal
+        isOpen={addRouteModalOpen}
+        onClose={() => setAddRouteModalOpen(false)}
+        onAddRoute={addRouteFromModal}
+        schools={schools}
+        isAdding={addingRoute}
+      />
+
+      <DeleteConfirmModal
+        isOpen={deleteModal.open}
+        onClose={() => !deleting && setDeleteModal({ open: false, type: null, id: null, name: null })}
+        onConfirm={handleConfirmDelete}
+        title={
+          deleteModal.type === "driver"
+            ? "Remove driver"
+            : deleteModal.type === "parent"
+              ? "Remove parent"
+              : deleteModal.type === "route"
+                ? "Delete route"
+                : deleteModal.type === "school"
+                  ? "Delete school"
+                  : "Delete"
+        }
+        description="This action cannot be undone."
+        itemName={deleteModal.name}
+        confirmLabel="Delete"
+        isLoading={deleting}
+      />
     </div>
   );
 };

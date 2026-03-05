@@ -65,7 +65,7 @@ class _SignupScreenState extends State<SignupScreen> {
         'name': name,
         'email': email,
         'role': role,
-        'status': role == 'driver' ? 'inactive' : 'active',
+        'status': role == 'driver' ? 'pending' : 'active',
         'createdAt': FieldValue.serverTimestamp(),
       });
 
