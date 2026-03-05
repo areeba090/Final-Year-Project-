@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { db, auth } from "../firebase";
 import {
   collection,
@@ -10,7 +10,6 @@ import {
   doc,
   addDoc,
   getDoc,
-  getDocs,
 } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 
@@ -42,12 +41,70 @@ const AdminDashboard = () => {
   const [addingRoute, setAddingRoute] = useState(false);
   const [addingSchool, setAddingSchool] = useState(false);
 
+  // Live driver location for map
+  const [selectedDriverLocation, setSelectedDriverLocation] = useState(null);
+  const mapRef = useRef(null);
+  const mapInstanceRef = useRef(null);
+  const markerRef = useRef(null);
+
   // Collapse sidebar by default on mobile & tablet
   useEffect(() => {
     if (window.innerWidth < 1024) {
       setCollapsed(true);
     }
   }, []);
+
+  // Subscribe to live location for selected driver
+  useEffect(() => {
+    if (!selectedDriver) {
+      setSelectedDriverLocation(null);
+      return;
+    }
+
+    const locRef = doc(db, "driverLocations", selectedDriver.id);
+    const unsub = onSnapshot(locRef, (snap) => {
+      if (!snap.exists()) {
+        setSelectedDriverLocation(null);
+        return;
+      }
+      const data = snap.data();
+      if (typeof data.latitude === "number" && typeof data.longitude === "number") {
+        setSelectedDriverLocation({
+          lat: data.latitude,
+          lng: data.longitude,
+          updatedAt: data.timestamp,
+        });
+      } else {
+        setSelectedDriverLocation(null);
+      }
+    });
+
+    return () => unsub();
+  }, [selectedDriver]);
+
+  // Initialize/update Google Map when location changes
+  useEffect(() => {
+    if (!selectedDriverLocation || !window.google || !mapRef.current) return;
+
+    const { lat, lng } = selectedDriverLocation;
+    const position = { lat, lng };
+
+    if (!mapInstanceRef.current) {
+      mapInstanceRef.current = new window.google.maps.Map(mapRef.current, {
+        center: position,
+        zoom: 16,
+        disableDefaultUI: false,
+      });
+      markerRef.current = new window.google.maps.Marker({
+        position,
+        map: mapInstanceRef.current,
+        title: selectedDriver?.name || "Driver",
+      });
+    } else {
+      markerRef.current.setPosition(position);
+      mapInstanceRef.current.panTo(position);
+    }
+  }, [selectedDriverLocation, selectedDriver]);
 
   // Fetch admin profile
   useEffect(() => {
@@ -900,6 +957,29 @@ const AdminDashboard = () => {
                       </dd>
                     </div>
                   </dl>
+
+                  <div className="mt-4">
+                    <h4 className="text-sm font-semibold text-slate-700 mb-2">
+                      Live location
+                    </h4>
+                    {selectedDriverLocation ? (
+                      <>
+                        <div className="text-xs text-slate-500 mb-2">
+                          Lat: {selectedDriverLocation.lat.toFixed(5)}, Lng:{" "}
+                          {selectedDriverLocation.lng.toFixed(5)}
+                        </div>
+                        <div
+                          ref={mapRef}
+                          className="w-full h-64 rounded-xl border border-slate-200 overflow-hidden"
+                        />
+                      </>
+                    ) : (
+                      <p className="text-xs text-slate-500">
+                        Waiting for driver GPS updates. Make sure the driver has started a ride in the app.
+                      </p>
+                    )}
+                  </div>
+
                   <button
                     onClick={() => setSelectedDriver(null)}
                     className="mt-6 w-full py-2 bg-slate-100 text-slate-700 rounded-xl font-medium hover:bg-slate-200 transition"

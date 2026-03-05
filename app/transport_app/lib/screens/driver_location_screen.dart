@@ -26,40 +26,57 @@ class _DriverLocationScreenState extends State<DriverLocationScreen> {
           .where('status', isEqualTo: 'approved')
           .snapshots(),
       builder: (context, requestSnap) {
-        if (!requestSnap.hasData) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        if (!requestSnap.hasData) {
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
+        }
 
         final requests = requestSnap.data!.docs;
-        if (requests.isEmpty) return const Scaffold(body: Center(child: Text("No driver assigned yet")));
+        if (requests.isEmpty) {
+          return const Scaffold(
+            body: Center(child: Text("No driver assigned yet")),
+          );
+        }
 
         final driverId = requests.first.data()['driverId'] as String?;
-        if (driverId == null) return const Scaffold(body: Center(child: Text("Driver ID not found")));
+        if (driverId == null || driverId.isEmpty) {
+          return const Scaffold(
+            body: Center(child: Text("Driver ID not found")),
+          );
+        }
 
+        // Listen to live GPS updates written by GPSController
         return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
-          stream: firestore.collection('users').doc(driverId).snapshots(),
-          builder: (context, driverSnap) {
-            if (!driverSnap.hasData) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+          stream: firestore.collection('driverLocations').doc(driverId).snapshots(),
+          builder: (context, locationSnap) {
+            if (!locationSnap.hasData || !locationSnap.data!.exists) {
+              return const Scaffold(
+                body: Center(child: Text("Waiting for driver location...")),
+              );
+            }
 
-            final driverData = driverSnap.data?.data();
-            if (driverData == null) return const Scaffold(body: Center(child: Text("Driver data not found")));
+            final locData = locationSnap.data!.data();
+            if (locData == null) {
+              return const Scaffold(
+                body: Center(child: Text("No location data available")),
+              );
+            }
 
-            // Get Firestore driver location
-            final lat = (driverData['location']?['lat'] ?? 0.0).toDouble();
-            final lng = (driverData['location']?['lng'] ?? 0.0).toDouble();
+            final lat = (locData['latitude'] ?? 0.0).toDouble();
+            final lng = (locData['longitude'] ?? 0.0).toDouble();
 
             // Update marker only if coordinates exist
             if (lat != 0.0 && lng != 0.0) {
               _driverPosition = LatLng(lat, lng);
-              _driverMarker = Marker(
-                markerId: const MarkerId("driver"),
-                position: _driverPosition!,
-                infoWindow: InfoWindow(
-                  title: driverData['name'] ?? 'Driver',
-                  snippet: "${driverData['vehicleName'] ?? ''} (${driverData['vehicleNumber'] ?? ''})",
-                ),
+              _driverMarker = const Marker(
+                markerId: MarkerId("driver"),
+              ).copyWith(
+                positionParam: _driverPosition,
               );
 
-              // Animate camera only once or when position changes
-              if (_mapController != null) {
+              // Animate camera when we have a controller
+              if (_mapController != null && _driverPosition != null) {
                 _mapController!.animateCamera(
                   CameraUpdate.newLatLng(_driverPosition!),
                 );
@@ -67,10 +84,10 @@ class _DriverLocationScreenState extends State<DriverLocationScreen> {
             }
 
             return Scaffold(
-              appBar: AppBar(title: Text("Tracking ${driverData['name'] ?? 'Driver'}")),
+              appBar: AppBar(title: const Text("Driver Live Location")),
               body: GoogleMap(
                 initialCameraPosition: CameraPosition(
-                  target: _driverPosition ?? const LatLng(34.168, 73.221), // fallback to a city center
+                  target: _driverPosition ?? const LatLng(34.168, 73.221),
                   zoom: 16,
                 ),
                 markers: _driverMarker != null ? {_driverMarker!} : {},
@@ -78,9 +95,10 @@ class _DriverLocationScreenState extends State<DriverLocationScreen> {
                 myLocationButtonEnabled: true,
                 onMapCreated: (controller) {
                   _mapController = controller;
-                  // Move camera if driver already has location
                   if (_driverPosition != null) {
-                    _mapController!.moveCamera(CameraUpdate.newLatLng(_driverPosition!));
+                    _mapController!.moveCamera(
+                      CameraUpdate.newLatLng(_driverPosition!),
+                    );
                   }
                 },
               ),
