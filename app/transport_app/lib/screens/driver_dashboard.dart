@@ -233,6 +233,36 @@ class _DriverDashboardState extends State<DriverDashboard> {
     );
   }
 
+  /// Sends a ride notification to the given child's parent (start or finish).
+  Future<void> _sendRideNotificationToParent({
+    required String type,
+    required String parentId,
+    required String childName,
+  }) async {
+    if (parentId.isEmpty) return;
+    try {
+      final driverSnap = await _firestore.collection('users').doc(_user.uid).get();
+      final driverName = driverSnap.data()?['name'] ?? 'Driver';
+
+      final message = type == 'ride_started'
+          ? 'Ride started for $childName.'
+          : 'Ride finished for $childName.';
+
+      await _firestore.collection('notifications').add({
+        'parentId': parentId,
+        'type': type,
+        'driverId': _user.uid,
+        'driverName': driverName,
+        'childName': childName,
+        'message': message,
+        'timestamp': FieldValue.serverTimestamp(),
+        'read': false,
+      });
+    } catch (e) {
+      debugPrint('Error sending ride notification: $e');
+    }
+  }
+
   // ================= Assigned Children Tab FIXED =================
   Widget _assignedChildren() {
     return StreamBuilder<QuerySnapshot>(
@@ -330,11 +360,18 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                   ),
                                   const SizedBox(width: 8),
                                   ElevatedButton(
-                                    onPressed: () {
-                                      setState(() => _rideOn = !_rideOn);
+                                    onPressed: () async {
+                                      final newRideOn = !_rideOn;
+                                      final childName = child['name'] ?? 'your child';
+                                      await _sendRideNotificationToParent(
+                                        type: newRideOn ? 'ride_started' : 'ride_ended',
+                                        parentId: parentId as String,
+                                        childName: childName,
+                                      );
+                                      setState(() => _rideOn = newRideOn);
                                       if (_rideOn) GPSController.startTracking(_user.uid);
                                       else GPSController.stopTracking();
-                                      _firestore.collection('users').doc(_user.uid).set({
+                                      await _firestore.collection('users').doc(_user.uid).set({
                                         'rideStatus': _rideOn ? 'on' : 'off',
                                       }, SetOptions(merge: true));
                                     },

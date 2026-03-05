@@ -70,6 +70,100 @@ class _ParentDashboardState extends State<ParentDashboard> {
     );
   }
 
+  // ================= NOTIFICATIONS (ride started / ride ended from driver) =================
+  Widget _notificationsPage() {
+    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+      stream: _firestore
+          .collection('notifications')
+          .where('parentId', isEqualTo: _currentUser.uid)
+          .snapshots(),
+      builder: (context, snapshot) {
+        if (!snapshot.hasData) {
+          return const Center(child: CircularProgressIndicator());
+        }
+        var docs = snapshot.data!.docs;
+        docs = docs.toList()
+          ..sort((a, b) {
+            final ta = a.data()['timestamp'] as Timestamp?;
+            final tb = b.data()['timestamp'] as Timestamp?;
+            if (ta == null && tb == null) return 0;
+            if (ta == null) return 1;
+            if (tb == null) return -1;
+            return tb.compareTo(ta);
+          });
+        if (docs.length > 50) docs = docs.sublist(0, 50);
+        if (docs.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24.0),
+              child: Text(
+                'No notifications yet.\nYou\'ll see "Ride started" and "Ride finished" here when the driver starts or ends the ride for your child.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.grey),
+              ),
+            ),
+          );
+        }
+        return ListView.builder(
+          padding: const EdgeInsets.all(16),
+          itemCount: docs.length,
+          itemBuilder: (context, index) {
+            final d = docs[index].data();
+            final type = d['type'] as String? ?? '';
+            final message = d['message'] as String? ?? '';
+            final driverName = d['driverName'] as String? ?? 'Driver';
+            final childName = d['childName'] as String?;
+            final timestamp = d['timestamp'] as dynamic;
+            final read = d['read'] as bool? ?? false;
+
+            final isStarted = type == 'ride_started';
+            return Card(
+              margin: const EdgeInsets.only(bottom: 12),
+              color: read ? null : (isStarted ? Colors.green.shade50 : Colors.blue.shade50),
+              child: ListTile(
+                leading: CircleAvatar(
+                  backgroundColor: isStarted ? Colors.green : Colors.blue,
+                  child: Icon(
+                    isStarted ? Icons.directions_car : Icons.check_circle,
+                    color: Colors.white,
+                  ),
+                ),
+                title: Text(
+                  isStarted ? 'Ride started' : 'Ride finished',
+                  style: TextStyle(
+                    fontWeight: read ? FontWeight.normal : FontWeight.bold,
+                  ),
+                ),
+                subtitle: Text(
+                  childName != null && childName.isNotEmpty
+                      ? '$message — $driverName'
+                      : '$message — $driverName',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                trailing: timestamp != null && timestamp is Timestamp
+                    ? Text(
+                        _formatTimestamp(timestamp as Timestamp),
+                        style: const TextStyle(fontSize: 12, color: Colors.grey),
+                      )
+                    : null,
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  String _formatTimestamp(Timestamp t) {
+    final d = t.toDate();
+    final now = DateTime.now();
+    if (d.year == now.year && d.month == now.month && d.day == now.day) {
+      return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+    }
+    return '${d.day}/${d.month}/${d.year}';
+  }
+
   // ================= DASHBOARD =================
   Widget _dashboard(Map<String, dynamic> data) {
     final children = List<Map<String, dynamic>>.from(data['children'] ?? []);
@@ -502,7 +596,7 @@ class _ParentDashboardState extends State<ParentDashboard> {
 
         final pages = [
           _personalInfo(data),
-          const Center(child: Text("Notifications")),
+          _notificationsPage(),
           _dashboard(data),
           _driversPage(data),
           _childrenPage(data),
