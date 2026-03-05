@@ -1,9 +1,13 @@
+import 'dart:async';
 import 'dart:typed_data';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
+import '../services/web_notifications.dart';
+import '../services/local_notifications.dart';
 import 'login_screen.dart';
 import 'driver_location_screen.dart';
 
@@ -18,6 +22,45 @@ class _ParentDashboardState extends State<ParentDashboard> {
   final _firestore = FirebaseFirestore.instance;
   final _currentUser = FirebaseAuth.instance.currentUser!;
   int _selectedIndex = 2;
+  final Set<String> _shownNotificationIds = {};
+  StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _notifSub;
+
+  @override
+  void initState() {
+    super.initState();
+    _listenForRideNotifications();
+  }
+
+  void _listenForRideNotifications() {
+    _notifSub?.cancel();
+    _notifSub = _firestore
+        .collection('notifications')
+        .where('parentId', isEqualTo: _currentUser.uid)
+        .snapshots()
+        .listen((snapshot) {
+      for (final change in snapshot.docChanges) {
+        if (change.type != DocumentChangeType.added) continue;
+        final doc = change.doc;
+        final data = doc.data();
+        if (data == null) continue;
+        if (_shownNotificationIds.contains(doc.id)) continue;
+        _shownNotificationIds.add(doc.id);
+
+        final type = data['type'] as String? ?? '';
+        final message = data['message'] as String? ?? '';
+        final childName = data['childName'] as String?;
+        final isStarted = type == 'ride_started';
+        final title = isStarted ? 'Ride started' : 'Ride finished';
+        final body = childName != null && childName.isNotEmpty ? message : message;
+
+        if (kIsWeb) {
+          showRideNotification(title, body);
+        } else {
+          LocalNotificationService.showRideNotification(title, body);
+        }
+      }
+    });
+  }
 
   // ================= CHILD FORM =================
   Uint8List? _childImageBytes;
@@ -108,7 +151,8 @@ class _ParentDashboardState extends State<ParentDashboard> {
           padding: const EdgeInsets.all(16),
           itemCount: docs.length,
           itemBuilder: (context, index) {
-            final d = docs[index].data();
+            final doc = docs[index];
+            final d = doc.data();
             final type = d['type'] as String? ?? '';
             final message = d['message'] as String? ?? '';
             final driverName = d['driverName'] as String? ?? 'Driver';
@@ -117,6 +161,7 @@ class _ParentDashboardState extends State<ParentDashboard> {
             final read = d['read'] as bool? ?? false;
 
             final isStarted = type == 'ride_started';
+
             return Card(
               margin: const EdgeInsets.only(bottom: 12),
               color: read ? null : (isStarted ? Colors.green.shade50 : Colors.blue.shade50),
@@ -640,3 +685,4 @@ class _ParentDashboardState extends State<ParentDashboard> {
         },
       );
 }
+

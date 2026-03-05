@@ -9,6 +9,7 @@ const SuperAdminDashboard = () => {
   const [loading, setLoading] = useState(true);
   const [newAdminEmail, setNewAdminEmail] = useState("");
   const [newAdminPassword, setNewAdminPassword] = useState("");
+  const [newAdminCity, setNewAdminCity] = useState("Abbottabad");
   const [adding, setAdding] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
 
@@ -30,6 +31,13 @@ const SuperAdminDashboard = () => {
     fetchAdmins();
   }, []);
 
+  // Collapse sidebar by default on mobile & tablet
+  useEffect(() => {
+    if (window.innerWidth < 1024) {
+      setCollapsed(true);
+    }
+  }, []);
+
   const handleAddAdmin = async () => {
     if (!newAdminEmail || !newAdminPassword) return alert("Enter email & password!");
     setAdding(true);
@@ -40,12 +48,25 @@ const SuperAdminDashboard = () => {
         email: newAdminEmail,
         role: "admin",
         uid,
+        city: newAdminCity,
+        cityId: newAdminCity.toLowerCase(),
         createdAt: new Date(),
       });
 
-      setAdmins(prev => [...prev, { id: docRef.id, email: newAdminEmail, role: "admin", uid }]);
+      setAdmins(prev => [
+        ...prev,
+        {
+          id: docRef.id,
+          email: newAdminEmail,
+          role: "admin",
+          uid,
+          city: newAdminCity,
+          cityId: newAdminCity.toLowerCase(),
+        },
+      ]);
       setNewAdminEmail("");
       setNewAdminPassword("");
+      setNewAdminCity("Abbottabad");
       alert("Admin added successfully!");
     } catch (err) {
       alert(err.code === "auth/email-already-in-use" ? "Email already registered." : err.message);
@@ -82,10 +103,10 @@ const SuperAdminDashboard = () => {
   }
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-violet-50 via-purple-50 to-fuchsia-100">
+    <div className="flex flex-col md:flex-row min-h-screen bg-gradient-to-br from-violet-50 via-purple-50 to-fuchsia-100">
       
       {/* ---------------- SIDEBAR ---------------- */}
-      <div className={`${collapsed ? "w-20" : "w-72"} bg-gradient-to-b from-violet-600 via-purple-600 to-fuchsia-600 shadow-2xl transition-all duration-300 relative`}>
+      <div className={`${collapsed ? "w-full md:w-20" : "w-full md:w-72"} bg-gradient-to-b from-violet-600 via-purple-600 to-fuchsia-600 shadow-2xl transition-all duration-300 relative flex-shrink-0`}>
         <div className="p-6">
           {/* Header */}
           <div className="flex items-center justify-between mb-10">
@@ -103,11 +124,17 @@ const SuperAdminDashboard = () => {
               </div>
             )}
             {collapsed && (
-              <div className="w-10 h-10 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center text-white font-bold text-lg mx-auto">
-                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <div className="flex items-center gap-3 -mb-10 md:hidden">
+              <div className="w-12 h-12 bg-white/20 backdrop-blur-sm rounded-xl flex items-center justify-center text-white font-bold text-xl shadow-lg">
+                <svg className="w-7 h-7" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                 </svg>
               </div>
+              <div>
+                <h2 className="text-2xl font-bold text-white">SuperAdmin</h2>
+                <p className="text-xs text-purple-200">Master Control</p>
+              </div>
+            </div>
             )}
           </div>
 
@@ -121,7 +148,7 @@ const SuperAdminDashboard = () => {
           </button>
 
           {/* Navigation */}
-          <nav className="space-y-2 mt-8">
+          <nav className={`space-y-2 mt-8 ${collapsed ? "hidden" : ""}`}>
             <button
               onClick={() => setActiveTab("dashboard")}
               className={`w-full text-left px-4 py-3.5 rounded-xl transition-all duration-300 flex items-center gap-3 ${
@@ -180,12 +207,12 @@ const SuperAdminDashboard = () => {
       </div>
 
       {/* ---------------- MAIN CONTENT ---------------- */}
-      <div className="flex-1 p-8 overflow-auto">
+      <div className="flex-1 w-full p-4 md:p-8 overflow-auto">
 
         {/* ---------------- DASHBOARD ---------------- */}
         {activeTab === "dashboard" && (
           <div className="space-y-8">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="text-4xl font-bold bg-gradient-to-r from-violet-600 to-fuchsia-600 bg-clip-text text-transparent">Dashboard Overview</h2>
                 <p className="text-gray-600 mt-1">Monitor your system at a glance</p>
@@ -242,7 +269,7 @@ const SuperAdminDashboard = () => {
         {/* ---------------- MANAGE ADMINS ---------------- */}
         {activeTab === "manageAdmins" && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="text-4xl font-bold bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">Manage Admins</h2>
                 <p className="text-gray-600 mt-1">Add and manage administrator accounts</p>
@@ -280,6 +307,17 @@ const SuperAdminDashboard = () => {
                     className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent shadow-sm transition bg-white"
                   />
                 </div>
+                <div className="flex-1">
+                  <select
+                    value={newAdminCity}
+                    onChange={(e) => setNewAdminCity(e.target.value)}
+                    className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-purple-400 focus:border-transparent shadow-sm transition bg-white"
+                  >
+                    <option value="Abbottabad">Abbottabad</option>
+                    <option value="Mansehra">Mansehra</option>
+                    <option value="Rawalpindi">Rawalpindi</option>
+                  </select>
+                </div>
                 <button
                   onClick={handleAddAdmin}
                   disabled={adding}
@@ -305,8 +343,8 @@ const SuperAdminDashboard = () => {
             </div>
 
             {/* Admins Table */}
-            <div className="bg-white shadow-2xl rounded-2xl overflow-hidden border border-gray-100">
-              <table className="w-full">
+            <div className="bg-white shadow-2xl rounded-2xl border border-gray-100 overflow-x-auto">
+              <table className="w-full min-w-[600px]">
                 <thead className="bg-gradient-to-r from-violet-600 to-purple-600 text-white">
                   <tr>
                     <th className="py-4 px-6 text-left font-semibold">Email</th>
@@ -367,7 +405,7 @@ const SuperAdminDashboard = () => {
         {/* ---------------- PAYMENTS ---------------- */}
         {activeTab === "payments" && (
           <div className="space-y-6">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
               <div>
                 <h2 className="text-4xl font-bold bg-gradient-to-r from-violet-600 to-fuchsia-600 bg-clip-text text-transparent">Payments</h2>
                 <p className="text-gray-600 mt-1">Manage payment transactions</p>
