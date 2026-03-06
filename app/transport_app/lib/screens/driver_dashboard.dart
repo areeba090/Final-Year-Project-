@@ -39,6 +39,8 @@ class _DriverDashboardState extends State<DriverDashboard> {
   String? _selectedRoute;
   final Set<String> _childrenOnRide = {};
   final Map<String, String> _childToParent = {};
+  bool _savingProfile = false;
+  String? _rideActionChildId;
 
   @override
   void dispose() {
@@ -175,21 +177,28 @@ class _DriverDashboardState extends State<DriverDashboard> {
       );
       return;
     }
-    await _firestore.collection('users').doc(_user.uid).set({
-      'name': _nameC.text.trim(),
-      'cnic': _cnicC.text.trim(),
-      'phone': _phoneC.text.trim(),
-      'licenseNumber': _licenseC.text.trim(),
-      'vehicleName': _vehicleNameC.text.trim(),
-      'vehicleNumber': _vehicleNumberC.text.trim(),
-      'school': _selectedSchool ?? '',
-      'route': _selectedRoute ?? '',
-      'seats': _seatsC.text.trim(),
-    }, SetOptions(merge: true));
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: const Text('Profile saved'), backgroundColor: AppTheme.success, behavior: SnackBarBehavior.floating),
-      );
+    setState(() => _savingProfile = true);
+    try {
+      await _firestore.collection('users').doc(_user.uid).set({
+        'name': _nameC.text.trim(),
+        'cnic': _cnicC.text.trim(),
+        'phone': _phoneC.text.trim(),
+        'licenseNumber': _licenseC.text.trim(),
+        'vehicleName': _vehicleNameC.text.trim(),
+        'vehicleNumber': _vehicleNumberC.text.trim(),
+        'school': _selectedSchool ?? '',
+        'route': _selectedRoute ?? '',
+        'seats': _seatsC.text.trim(),
+      }, SetOptions(merge: true));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: const Text('Profile saved'), backgroundColor: AppTheme.success, behavior: SnackBarBehavior.floating),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _savingProfile = false);
+      }
     }
   }
 
@@ -268,7 +277,11 @@ class _DriverDashboardState extends State<DriverDashboard> {
                 SizedBox(height: AppTheme.verticalSpacing(context)),
                 TextField(controller: _seatsC, decoration: const InputDecoration(labelText: 'Seats'), keyboardType: TextInputType.number, textInputAction: TextInputAction.done),
                 SizedBox(height: AppTheme.verticalSpacing(context) * 2),
-                FilledButton.icon(onPressed: _saveProfile, icon: const Icon(Icons.save_rounded, size: 20), label: const Text('Save profile')),
+                FilledButton.icon(
+                  onPressed: _savingProfile ? null : _saveProfile,
+                  icon: const Icon(Icons.save_rounded, size: 20),
+                  label: Text(_savingProfile ? 'Saving…' : 'Save profile'),
+                ),
                 SizedBox(height: MediaQuery.paddingOf(context).bottom + 16),
               ],
             ),
@@ -426,6 +439,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
                       final picUrl = child['photo'] ?? '';
                       final childId = child['id'] as String? ?? '';
                       final isChildOnRide = _childrenOnRide.contains(childId);
+                      final isActionLoading = _rideActionChildId == childId;
                       return Card(
                         margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
                         child: Padding(
@@ -480,37 +494,59 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                         label: Text(narrow ? 'Call' : 'Call parent'),
                                       ),
                                       FilledButton.icon(
-                                        onPressed: () async {
-                                          final newRideOn = !isChildOnRide;
-                                          final childName = child['name'] ?? 'your child';
-                                          await _sendRideNotificationToParent(type: newRideOn ? 'ride_started' : 'ride_ended', parentId: parentId, childName: childName);
-                                          setState(() {
-                                            if (newRideOn) _childrenOnRide.add(childId);
-                                            else _childrenOnRide.remove(childId);
-                                          });
-                                          if (_childrenOnRide.isNotEmpty) {
-                                            final parentIds = _childrenOnRide.map((c) => _childToParent[c]).whereType<String>().toSet().toList();
-                                            final routeName = (driverData['route'] ?? '').toString();
-                                            final bounds = routeName.isNotEmpty
-                                                ? await getRouteBoundsByRouteName(_firestore, routeName)
-                                                : null;
-                                            final driverBounds = bounds != null
-                                                ? DriverRouteBounds(startLat: bounds.startLat, startLng: bounds.startLng, endLat: bounds.endLat, endLng: bounds.endLng)
-                                                : null;
-                                            if (GPSController.isTracking) {
-                                              GPSController.updateRideParents(parentIds);
-                                            } else {
-                                              GPSController.startTracking(_user.uid, routeBounds: driverBounds, parentIds: parentIds);
-                                            }
-                                          } else {
-                                            GPSController.stopTracking();
-                                            await GPSController.clearRideStatus(_user.uid);
-                                          }
-                                          await _firestore.collection('users').doc(_user.uid).set({'rideStatus': _childrenOnRide.isNotEmpty ? 'on' : 'off'}, SetOptions(merge: true));
-                                        },
+                                        onPressed: isActionLoading
+                                            ? null
+                                            : () async {
+                                                setState(() => _rideActionChildId = childId);
+                                                try {
+                                                  final newRideOn = !isChildOnRide;
+                                                  final childName = child['name'] ?? 'your child';
+                                                  await _sendRideNotificationToParent(type: newRideOn ? 'ride_started' : 'ride_ended', parentId: parentId, childName: childName);
+                                                  setState(() {
+                                                    if (newRideOn) {
+                                                      _childrenOnRide.add(childId);
+                                                    } else {
+                                                      _childrenOnRide.remove(childId);
+                                                    }
+                                                  });
+                                                  if (_childrenOnRide.isNotEmpty) {
+                                                    final parentIds = _childrenOnRide.map((c) => _childToParent[c]).whereType<String>().toSet().toList();
+                                                    final routeName = (driverData['route'] ?? '').toString();
+                                                    final bounds = routeName.isNotEmpty
+                                                        ? await getRouteBoundsByRouteName(_firestore, routeName)
+                                                        : null;
+                                                    final driverBounds = bounds != null
+                                                        ? DriverRouteBounds(startLat: bounds.startLat, startLng: bounds.startLng, endLat: bounds.endLat, endLng: bounds.endLng)
+                                                        : null;
+                                                    if (GPSController.isTracking) {
+                                                      GPSController.updateRideParents(parentIds);
+                                                    } else {
+                                                      GPSController.startTracking(_user.uid, routeBounds: driverBounds, parentIds: parentIds);
+                                                    }
+                                                  } else {
+                                                    GPSController.stopTracking();
+                                                    await GPSController.clearRideStatus(_user.uid);
+                                                  }
+                                                  await _firestore.collection('users').doc(_user.uid).set({'rideStatus': _childrenOnRide.isNotEmpty ? 'on' : 'off'}, SetOptions(merge: true));
+                                                } finally {
+                                                  if (mounted) {
+                                                    setState(() => _rideActionChildId = null);
+                                                  }
+                                                }
+                                              },
                                         style: FilledButton.styleFrom(backgroundColor: isChildOnRide ? AppTheme.error : AppTheme.success),
-                                        icon: Icon(isChildOnRide ? Icons.stop_rounded : Icons.play_arrow_rounded, size: 18),
-                                        label: Text(isChildOnRide ? 'Stop ride' : 'Start ride'),
+                                        icon: isActionLoading
+                                            ? const SizedBox(
+                                                width: 18,
+                                                height: 18,
+                                                child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                              )
+                                            : Icon(isChildOnRide ? Icons.stop_rounded : Icons.play_arrow_rounded, size: 18),
+                                        label: Text(
+                                          isActionLoading
+                                              ? 'Please wait…'
+                                              : (isChildOnRide ? 'Stop ride' : 'Start ride'),
+                                        ),
                                       ),
                                     ],
                                   );

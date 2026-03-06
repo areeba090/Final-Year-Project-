@@ -10,6 +10,7 @@ import {
   doc,
   addDoc,
   getDoc,
+  setDoc,
 } from "firebase/firestore";
 import { signOut } from "firebase/auth";
 import DeleteConfirmModal from "../components/DeleteConfirmModal";
@@ -125,11 +126,19 @@ const AdminDashboard = () => {
   }, []);
 
   const saveAdminProfile = async () => {
-    if (!auth.currentUser) return;
+    const user = auth.currentUser;
+    if (!user) return;
+    const phone = adminProfile.phone || "";
+    // Expect Pakistani mobile like +92 3XX XXXXXXX
+    if (!/^\+923\d{9}$/.test(phone)) {
+      error("Please enter a valid Pakistani mobile number (e.g. +92 3XX XXXXXXX).");
+      return;
+    }
     setSavingProfile(true);
     try {
-      const adminRef = doc(db, "users", auth.currentUser.uid);
-      await updateDoc(adminRef, adminProfile);
+      const adminRef = doc(db, "users", user.uid);
+      // Use setDoc with merge so the profile can be created if it doesn't exist yet
+      await setDoc(adminRef, adminProfile, { merge: true });
       success("Profile saved!");
     } catch (e) {
       error("Failed to save profile.");
@@ -761,16 +770,32 @@ const AdminDashboard = () => {
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Phone
+                  Phone (Pakistan)
                 </label>
-                <input
-                  value={adminProfile.phone}
-                  onChange={(e) =>
-                    setAdminProfile({ ...adminProfile, phone: e.target.value })
-                  }
-                  className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400 transition"
-                  placeholder="Phone number"
-                />
+                <div className="flex">
+                  <span className="inline-flex items-center gap-1 px-3 py-3 rounded-l-xl border border-r-0 border-slate-200 bg-slate-50 text-sm text-slate-700">
+                    <span role="img" aria-label="Pakistan flag">
+                      🇵🇰
+                    </span>
+                    +92
+                  </span>
+                  <input
+                    value={(adminProfile.phone || "").replace(/^\+92/, "")}
+                    onChange={(e) => {
+                      const digits = e.target.value.replace(/\D/g, "").slice(0, 10);
+                      setAdminProfile({
+                        ...adminProfile,
+                        phone: digits ? `+92${digits}` : "",
+                      });
+                    }}
+                    className="w-full px-4 py-3 border border-slate-200 border-l-0 rounded-r-xl focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400 transition"
+                    placeholder="3XX XXXXXXX"
+                    inputMode="numeric"
+                  />
+                </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  Enter a valid Pakistani mobile number, e.g. 3XX XXXXXXX.
+                </p>
               </div>
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
@@ -995,13 +1020,14 @@ const AdminDashboard = () => {
                 onClick={() => setSelectedDriver(null)}
               >
                 <div
-                  className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl"
+                  className="bg-white rounded-2xl p-6 max-w-md w-full shadow-2xl max-h-[90vh] flex flex-col"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <h3 className="text-xl font-semibold text-slate-800 mb-4">
                     Driver details
                   </h3>
-                  <dl className="space-y-2 text-sm">
+                  <div className="flex-1 overflow-y-auto pr-1 space-y-4">
+                    <dl className="space-y-2 text-sm">
                     <div>
                       <dt className="text-slate-500">Name</dt>
                       <dd className="font-medium">{selectedDriver.name}</dd>
@@ -1031,28 +1057,112 @@ const AdminDashboard = () => {
                         {selectedDriver.availableSeats ?? 0} available
                       </dd>
                     </div>
-                  </dl>
-
-                  <div className="mt-4">
-                    <h4 className="text-sm font-semibold text-slate-700 mb-2">
-                      Live location
-                    </h4>
-                    {selectedDriverLocation ? (
-                      <>
-                        <div className="text-xs text-slate-500 mb-2">
-                          Lat: {selectedDriverLocation.lat.toFixed(5)}, Lng:{" "}
-                          {selectedDriverLocation.lng.toFixed(5)}
+                    </dl>
+                    {(selectedDriver.profilePic ||
+                    selectedDriver.cnicPic ||
+                    selectedDriver.licensePic ||
+                    selectedDriver.vehiclePic) && (
+                      <div className="mt-2 space-y-3">
+                        <h4 className="text-sm font-semibold text-slate-700">
+                          Documents & photos
+                        </h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                          {selectedDriver.profilePic && (
+                            <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50">
+                              <div className="px-3 py-2 text-xs font-medium text-slate-600">
+                                Profile photo
+                              </div>
+                              <a
+                                href={selectedDriver.profilePic}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                <img
+                                  src={selectedDriver.profilePic}
+                                  alt="Driver profile"
+                                  className="w-full h-32 object-cover"
+                                />
+                              </a>
+                            </div>
+                          )}
+                          {selectedDriver.cnicPic && (
+                            <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50">
+                              <div className="px-3 py-2 text-xs font-medium text-slate-600">
+                                CNIC
+                              </div>
+                              <a
+                                href={selectedDriver.cnicPic}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                <img
+                                  src={selectedDriver.cnicPic}
+                                  alt="Driver CNIC"
+                                  className="w-full h-32 object-cover"
+                                />
+                              </a>
+                            </div>
+                          )}
+                          {selectedDriver.licensePic && (
+                            <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50">
+                              <div className="px-3 py-2 text-xs font-medium text-slate-600">
+                                License
+                              </div>
+                              <a
+                                href={selectedDriver.licensePic}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                <img
+                                  src={selectedDriver.licensePic}
+                                  alt="Driver license"
+                                  className="w-full h-32 object-cover"
+                                />
+                              </a>
+                            </div>
+                          )}
+                          {selectedDriver.vehiclePic && (
+                            <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50">
+                              <div className="px-3 py-2 text-xs font-medium text-slate-600">
+                                Vehicle
+                              </div>
+                              <a
+                                href={selectedDriver.vehiclePic}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                <img
+                                  src={selectedDriver.vehiclePic}
+                                  alt="Driver vehicle"
+                                  className="w-full h-32 object-cover"
+                                />
+                              </a>
+                            </div>
+                          )}
                         </div>
-                        <div
-                          ref={mapRef}
-                          className="w-full h-64 rounded-xl border border-slate-200 overflow-hidden"
-                        />
-                      </>
-                    ) : (
-                      <p className="text-xs text-slate-500">
-                        Waiting for driver GPS updates. Make sure the driver has started a ride in the app.
-                      </p>
+                      </div>
                     )}
+                    <div className="mt-2">
+                      <h4 className="text-sm font-semibold text-slate-700 mb-2">
+                        Live location
+                      </h4>
+                      {selectedDriverLocation ? (
+                        <>
+                          <div className="text-xs text-slate-500 mb-2">
+                            Lat: {selectedDriverLocation.lat.toFixed(5)}, Lng:{" "}
+                            {selectedDriverLocation.lng.toFixed(5)}
+                          </div>
+                          <div
+                            ref={mapRef}
+                            className="w-full h-64 rounded-xl border border-slate-200 overflow-hidden"
+                          />
+                        </>
+                      ) : (
+                        <p className="text-xs text-slate-500">
+                          Waiting for driver GPS updates. Make sure the driver has started a ride in the app.
+                        </p>
+                      )}
+                    </div>
                   </div>
 
                   <button

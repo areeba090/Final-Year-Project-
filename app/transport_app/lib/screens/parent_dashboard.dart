@@ -26,6 +26,8 @@ class _ParentDashboardState extends State<ParentDashboard> {
   final Set<String> _shownNotificationIds = {};
   StreamSubscription<QuerySnapshot<Map<String, dynamic>>>? _notifSub;
   bool _requestedWebNotificationPermission = false;
+  bool _savingPersonalInfo = false;
+  String? _requestingForChildId;
 
   @override
   void initState() {
@@ -108,20 +110,29 @@ class _ParentDashboardState extends State<ParentDashboard> {
             TextField(controller: phone, decoration: const InputDecoration(labelText: 'Phone'), keyboardType: TextInputType.phone, textInputAction: TextInputAction.done),
             SizedBox(height: AppTheme.verticalSpacing(context) * 2),
             FilledButton.icon(
-              onPressed: () async {
-                await _firestore.collection('users').doc(_currentUser.uid).set({
-                  'name': name.text,
-                  'cnic': cnic.text,
-                  'phone': phone.text,
-                }, SetOptions(merge: true));
-                if (mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: const Text('Saved'), backgroundColor: AppTheme.success, behavior: SnackBarBehavior.floating),
-                  );
-                }
-              },
+              onPressed: _savingPersonalInfo
+                  ? null
+                  : () async {
+                      setState(() => _savingPersonalInfo = true);
+                      try {
+                        await _firestore.collection('users').doc(_currentUser.uid).set({
+                          'name': name.text,
+                          'cnic': cnic.text,
+                          'phone': phone.text,
+                        }, SetOptions(merge: true));
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: const Text('Saved'), backgroundColor: AppTheme.success, behavior: SnackBarBehavior.floating),
+                          );
+                        }
+                      } finally {
+                        if (mounted) {
+                          setState(() => _savingPersonalInfo = false);
+                        }
+                      }
+                    },
               icon: const Icon(Icons.save_rounded, size: 20),
-              label: const Text('Save'),
+              label: Text(_savingPersonalInfo ? 'Saving…' : 'Save'),
             ),
             SizedBox(height: MediaQuery.paddingOf(context).bottom + 24),
           ],
@@ -226,11 +237,13 @@ class _ParentDashboardState extends State<ParentDashboard> {
 
   String _formatTimestamp(Timestamp t) {
     final d = t.toDate();
-    final now = DateTime.now();
-    if (d.year == now.year && d.month == now.month && d.day == now.day) {
-      return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
-    }
-    return '${d.day}/${d.month}/${d.year}';
+    final day = d.day.toString().padLeft(2, '0');
+    final month = d.month.toString().padLeft(2, '0');
+    final year = d.year.toString();
+    final hour = d.hour.toString().padLeft(2, '0');
+    final minute = d.minute.toString().padLeft(2, '0');
+    // Show full date and time for each notification.
+    return '$day/$month/$year  $hour:$minute';
   }
 
   Widget _dashboard(Map<String, dynamic> data) {
@@ -573,6 +586,7 @@ class _ParentDashboardState extends State<ParentDashboard> {
         final childName = child['name']?.toString() ?? '';
         final childSchool = child['school']?.toString() ?? '';
         final childRoute = child['route']?.toString() ?? '';
+        final isRequesting = _requestingForChildId == childId;
 
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -699,23 +713,54 @@ class _ParentDashboardState extends State<ParentDashboard> {
                                 _driverInfoRow(Icons.route_rounded, 'Route', d['route']?.toString() ?? '—'),
                                 SizedBox(height: AppTheme.verticalSpacing(context)),
                                 FilledButton(
-                                  onPressed: () async {
-                                    final adminSnapshot = await _firestore.collection('users').where('role', isEqualTo: 'admin').get();
-                                    for (var adminDoc in adminSnapshot.docs) {
-                                      await _firestore.collection('requests').add({
-                                        'parentId': _currentUser.uid,
-                                        'driverId': doc.id,
-                                        'childIds': [childId],
-                                        'status': 'pending',
-                                        'adminId': adminDoc.id,
-                                        'timestamp': FieldValue.serverTimestamp(),
-                                      });
-                                    }
-                                    if (mounted) {
-                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request sent to admin'), backgroundColor: AppTheme.success, behavior: SnackBarBehavior.floating));
-                                    }
-                                  },
-                                  child: const Text('Request driver'),
+                                  onPressed: isRequesting
+                                      ? null
+                                      : () async {
+                                          setState(() => _requestingForChildId = childId);
+                                          try {
+                                            // Create a single request document instead of one per admin.
+                                            final adminSnapshot = await _firestore
+                                                .collection('users')
+                                                .where('role', isEqualTo: 'admin')
+                                                .limit(1)
+                                                .get();
+                                            String? adminId;
+                                            if (adminSnapshot.docs.isNotEmpty) {
+                                              adminId = adminSnapshot.docs.first.id;
+                                            }
+                                            final requestData = <String, dynamic>{
+                                              'parentId': _currentUser.uid,
+                                              'driverId': doc.id,
+                                              'childIds': [childId],
+                                              'status': 'pending',
+                                              'timestamp': FieldValue.serverTimestamp(),
+                                            };
+                                            if (adminId != null) {
+                                              requestData['adminId'] = adminId;
+                                            }
+                                            await _firestore.collection('requests').add(requestData);
+                                            if (mounted) {
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                const SnackBar(
+                                                  content: Text('Request sent to admin'),
+                                                  backgroundColor: AppTheme.success,
+                                                  behavior: SnackBarBehavior.floating,
+                                                ),
+                                              );
+                                            }
+                                          } finally {
+                                            if (mounted) {
+                                              setState(() => _requestingForChildId = null);
+                                            }
+                                          }
+                                        },
+                                  child: isRequesting
+                                      ? const SizedBox(
+                                          height: 18,
+                                          width: 18,
+                                          child: CircularProgressIndicator(strokeWidth: 2),
+                                        )
+                                      : const Text('Request driver'),
                                 ),
                               ],
                             ),

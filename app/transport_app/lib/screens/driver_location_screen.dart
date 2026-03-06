@@ -237,18 +237,9 @@ class _TrackingContentState extends State<_TrackingContent> {
   }
 
   Future<void> _sendDeviationNotification() async {
-    final firestore = FirebaseFirestore.instance;
-    try {
-      await firestore.collection('notifications').add({
-        'parentId': widget.parentId,
-        'type': 'route_deviation',
-        'message': 'Driver has deviated from the route by more than 1 km.',
-        'timestamp': FieldValue.serverTimestamp(),
-        'read': false,
-      });
-    } catch (e) {
-      debugPrint('Error sending deviation notification: $e');
-    }
+    // Firestore notifications for route deviations are created from the driver's
+    // GPS tracking (see GPSController), to avoid duplicate records. Here we only
+    // show a local/web notification for the parent.
     if (kIsWeb) {
       showRideNotification('Route deviation', 'Driver has deviated from the route by more than 1 km.');
     } else {
