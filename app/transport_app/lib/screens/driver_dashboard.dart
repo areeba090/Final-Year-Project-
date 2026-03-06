@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import 'gps_controller.dart';
+import 'driver_location_screen.dart';
 import 'login_screen.dart';
 
 class DriverDashboard extends StatefulWidget {
@@ -37,6 +38,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
   String? _selectedSchool;
   String? _selectedRoute;
   final Set<String> _childrenOnRide = {};
+  final Map<String, String> _childToParent = {};
 
   @override
   void dispose() {
@@ -372,7 +374,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
     }
   }
 
-  Widget _assignedChildren() {
+  Widget _assignedChildren(Map<String, dynamic> driverData) {
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collection('requests').where('driverId', isEqualTo: _user.uid).where('status', isEqualTo: 'approved').snapshots(),
       builder: (context, driverReqSnap) {
@@ -409,6 +411,15 @@ class _DriverDashboardState extends State<DriverDashboard> {
                   final children = parentData['children'] as List<dynamic>? ?? [];
                   final assignedChildren = children.where((c) => c['assignedDriver'] == _user.uid).toList();
                   if (assignedChildren.isEmpty) return const SizedBox();
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted) return;
+                    setState(() {
+                      for (final c in assignedChildren) {
+                        final id = c['id']?.toString();
+                        if (id != null) _childToParent[id] = parentId;
+                      }
+                    });
+                  });
 
                   return Column(
                     children: assignedChildren.map((child) {
@@ -477,8 +488,24 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                             if (newRideOn) _childrenOnRide.add(childId);
                                             else _childrenOnRide.remove(childId);
                                           });
-                                          if (_childrenOnRide.isNotEmpty) GPSController.startTracking(_user.uid);
-                                          else GPSController.stopTracking();
+                                          if (_childrenOnRide.isNotEmpty) {
+                                            final parentIds = _childrenOnRide.map((c) => _childToParent[c]).whereType<String>().toSet().toList();
+                                            final routeName = (driverData['route'] ?? '').toString();
+                                            final bounds = routeName.isNotEmpty
+                                                ? await getRouteBoundsByRouteName(_firestore, routeName)
+                                                : null;
+                                            final driverBounds = bounds != null
+                                                ? DriverRouteBounds(startLat: bounds.startLat, startLng: bounds.startLng, endLat: bounds.endLat, endLng: bounds.endLng)
+                                                : null;
+                                            if (GPSController.isTracking) {
+                                              GPSController.updateRideParents(parentIds);
+                                            } else {
+                                              GPSController.startTracking(_user.uid, routeBounds: driverBounds, parentIds: parentIds);
+                                            }
+                                          } else {
+                                            GPSController.stopTracking();
+                                            await GPSController.clearRideStatus(_user.uid);
+                                          }
                                           await _firestore.collection('users').doc(_user.uid).set({'rideStatus': _childrenOnRide.isNotEmpty ? 'on' : 'off'}, SetOptions(merge: true));
                                         },
                                         style: FilledButton.styleFrom(backgroundColor: isChildOnRide ? AppTheme.error : AppTheme.success),
@@ -609,7 +636,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
         final pages = [
           _profile(data),
           _dashboard(data),
-          _assignedChildren(),
+          _assignedChildren(data),
           _manageRoute(),
           _empty('Feedback', Icons.feedback_outlined),
           _empty('Earnings', Icons.payments_outlined),

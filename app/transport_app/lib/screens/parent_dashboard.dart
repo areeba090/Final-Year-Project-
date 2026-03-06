@@ -54,9 +54,10 @@ class _ParentDashboardState extends State<ParentDashboard> {
         final type = data['type'] as String? ?? '';
         final message = data['message'] as String? ?? '';
         final childName = data['childName'] as String?;
+        final isDeviation = type == 'route_deviation';
         final isStarted = type == 'ride_started';
-        final title = isStarted ? 'Ride started' : 'Ride finished';
-        final body = childName != null && childName.isNotEmpty ? message : message;
+        final String title = isDeviation ? 'Route deviation' : (isStarted ? 'Ride started' : 'Ride finished');
+        final String body = isDeviation ? message : (childName != null && childName.isNotEmpty ? message : message);
         if (kIsWeb) {
           showRideNotification(title, body);
         } else {
@@ -184,24 +185,29 @@ class _ParentDashboardState extends State<ParentDashboard> {
             final timestamp = d['timestamp'] as dynamic;
             final read = d['read'] as bool? ?? false;
             final isStarted = type == 'ride_started';
+            final isDeviation = type == 'route_deviation';
+            final String titleText = isDeviation ? 'Route deviation' : (isStarted ? 'Ride started' : 'Ride finished');
+            final Color avatarColor = isDeviation ? AppTheme.warning : (isStarted ? AppTheme.success : AppTheme.primary);
+            final IconData avatarIcon = isDeviation ? Icons.warning_rounded : (isStarted ? Icons.directions_car_rounded : Icons.check_circle_rounded);
+            final Color cardHighlight = read ? Colors.transparent : (isDeviation ? AppTheme.warning.withOpacity(0.08) : (isStarted ? AppTheme.success.withOpacity(0.08) : AppTheme.primary.withOpacity(0.08)));
 
             return Card(
               margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
-              color: read ? null : (isStarted ? AppTheme.success.withOpacity(0.08) : AppTheme.primary.withOpacity(0.08)),
+              color: cardHighlight,
               child: ListTile(
                 contentPadding: EdgeInsets.symmetric(horizontal: AppTheme.horizontalPadding(context), vertical: 8),
                 leading: CircleAvatar(
-                  backgroundColor: isStarted ? AppTheme.success : AppTheme.primary,
-                  child: Icon(isStarted ? Icons.directions_car_rounded : Icons.check_circle_rounded, color: Colors.white, size: 24),
+                  backgroundColor: avatarColor,
+                  child: Icon(avatarIcon, color: Colors.white, size: 24),
                 ),
                 title: Text(
-                  isStarted ? 'Ride started' : 'Ride finished',
+                  titleText,
                   style: TextStyle(fontWeight: read ? FontWeight.normal : FontWeight.w600, color: AppTheme.textPrimary),
                 ),
                 subtitle: Padding(
                   padding: const EdgeInsets.only(top: 4),
                   child: Text(
-                    childName != null && childName.isNotEmpty ? '$message — $driverName' : '$message — $driverName',
+                    isDeviation ? message : (childName != null && childName.isNotEmpty ? '$message — $driverName' : '$message — $driverName'),
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
