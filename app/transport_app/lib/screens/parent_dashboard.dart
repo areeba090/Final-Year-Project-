@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
+import '../theme/app_theme.dart';
 import '../services/web_notifications.dart';
 import '../services/local_notifications.dart';
 import 'login_screen.dart';
@@ -50,14 +51,12 @@ class _ParentDashboardState extends State<ParentDashboard> {
         if (data == null) continue;
         if (_shownNotificationIds.contains(doc.id)) continue;
         _shownNotificationIds.add(doc.id);
-
         final type = data['type'] as String? ?? '';
         final message = data['message'] as String? ?? '';
         final childName = data['childName'] as String?;
         final isStarted = type == 'ride_started';
         final title = isStarted ? 'Ride started' : 'Ride finished';
         final body = childName != null && childName.isNotEmpty ? message : message;
-
         if (kIsWeb) {
           showRideNotification(title, body);
         } else {
@@ -67,21 +66,17 @@ class _ParentDashboardState extends State<ParentDashboard> {
     });
   }
 
-  // ================= CHILD FORM =================
   Uint8List? _childImageBytes;
   bool _isUploading = false;
-
   final TextEditingController _childNameController = TextEditingController();
   final TextEditingController _childAgeController = TextEditingController();
   final TextEditingController _childRouteDetailsController = TextEditingController();
   final TextEditingController _childSchoolOnController = TextEditingController();
   final TextEditingController _childSchoolOffController = TextEditingController();
-
   String? _childSchool;
   String? _childRoute;
   int? _editingChildIndex;
 
-  // ================= IMAGE PICK =================
   Future<void> _pickChildImage() async {
     final picker = ImagePicker();
     final XFile? picked = await picker.pickImage(source: ImageSource.gallery, imageQuality: 80);
@@ -90,41 +85,53 @@ class _ParentDashboardState extends State<ParentDashboard> {
     setState(() => _childImageBytes = bytes);
   }
 
-  // ================= PERSONAL INFO =================
   Widget _personalInfo(Map<String, dynamic> data) {
-    final name = TextEditingController(text: data['name']);
-    final cnic = TextEditingController(text: data['cnic']);
-    final phone = TextEditingController(text: data['phone']);
+    final name = TextEditingController(text: data['name']?.toString() ?? '');
+    final cnic = TextEditingController(text: data['cnic']?.toString() ?? '');
+    final phone = TextEditingController(text: data['phone']?.toString() ?? '');
 
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(children: [
-        TextField(controller: name, decoration: const InputDecoration(labelText: "Name")),
-        TextField(controller: cnic, decoration: const InputDecoration(labelText: "CNIC")),
-        TextField(controller: phone, decoration: const InputDecoration(labelText: "Phone")),
-        const SizedBox(height: 24),
-        ElevatedButton(
-          onPressed: () async {
-            await _firestore.collection('users').doc(_currentUser.uid).set({
-              "name": name.text,
-              "cnic": cnic.text,
-              "phone": phone.text,
-            }, SetOptions(merge: true));
-            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text("Saved!")));
-          },
-          child: const Text("Save"),
-        )
-      ]),
+    final padding = AppTheme.contentPadding(context);
+    return SingleChildScrollView(
+      padding: padding,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: AppTheme.maxContentWidth),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text('Personal information', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+            SizedBox(height: AppTheme.verticalSpacing(context)),
+            TextField(controller: name, decoration: const InputDecoration(labelText: 'Name'), textInputAction: TextInputAction.next),
+            SizedBox(height: AppTheme.verticalSpacing(context)),
+            TextField(controller: cnic, decoration: const InputDecoration(labelText: 'CNIC'), keyboardType: TextInputType.number, textInputAction: TextInputAction.next),
+            SizedBox(height: AppTheme.verticalSpacing(context)),
+            TextField(controller: phone, decoration: const InputDecoration(labelText: 'Phone'), keyboardType: TextInputType.phone, textInputAction: TextInputAction.done),
+            SizedBox(height: AppTheme.verticalSpacing(context) * 2),
+            FilledButton.icon(
+              onPressed: () async {
+                await _firestore.collection('users').doc(_currentUser.uid).set({
+                  'name': name.text,
+                  'cnic': cnic.text,
+                  'phone': phone.text,
+                }, SetOptions(merge: true));
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: const Text('Saved'), backgroundColor: AppTheme.success, behavior: SnackBarBehavior.floating),
+                  );
+                }
+              },
+              icon: const Icon(Icons.save_rounded, size: 20),
+              label: const Text('Save'),
+            ),
+            SizedBox(height: MediaQuery.paddingOf(context).bottom + 24),
+          ],
+        ),
+      ),
     );
   }
 
-  // ================= NOTIFICATIONS (ride started / ride ended from driver) =================
   Widget _notificationsPage() {
     return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
-      stream: _firestore
-          .collection('notifications')
-          .where('parentId', isEqualTo: _currentUser.uid)
-          .snapshots(),
+      stream: _firestore.collection('notifications').where('parentId', isEqualTo: _currentUser.uid).snapshots(),
       builder: (context, snapshot) {
         if (!snapshot.hasData) {
           return const Center(child: CircularProgressIndicator());
@@ -140,20 +147,32 @@ class _ParentDashboardState extends State<ParentDashboard> {
             return tb.compareTo(ta);
           });
         if (docs.length > 50) docs = docs.sublist(0, 50);
+
         if (docs.isEmpty) {
-          return const Center(
+          return Center(
             child: Padding(
-              padding: EdgeInsets.all(24.0),
-              child: Text(
-                'No notifications yet.\nYou\'ll see "Ride started" and "Ride finished" here when the driver starts or ends the ride for your child.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.grey),
+              padding: AppTheme.contentPadding(context),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.notifications_none_rounded, size: 64, color: AppTheme.textSecondary.withOpacity(0.5)),
+                  const SizedBox(height: 16),
+                  Text('No notifications yet', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppTheme.textPrimary)),
+                  const SizedBox(height: 8),
+                  Text(
+                    'You\'ll see "Ride started" and "Ride finished" here when the driver starts or ends the ride for your child.',
+                    textAlign: TextAlign.center,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
+                  ),
+                ],
               ),
             ),
           );
         }
+
+        final padding = AppTheme.contentPadding(context);
         return ListView.builder(
-          padding: const EdgeInsets.all(16),
+          padding: padding,
           itemCount: docs.length,
           itemBuilder: (context, index) {
             final doc = docs[index];
@@ -164,38 +183,32 @@ class _ParentDashboardState extends State<ParentDashboard> {
             final childName = d['childName'] as String?;
             final timestamp = d['timestamp'] as dynamic;
             final read = d['read'] as bool? ?? false;
-
             final isStarted = type == 'ride_started';
 
             return Card(
-              margin: const EdgeInsets.only(bottom: 12),
-              color: read ? null : (isStarted ? Colors.green.shade50 : Colors.blue.shade50),
+              margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
+              color: read ? null : (isStarted ? AppTheme.success.withOpacity(0.08) : AppTheme.primary.withOpacity(0.08)),
               child: ListTile(
+                contentPadding: EdgeInsets.symmetric(horizontal: AppTheme.horizontalPadding(context), vertical: 8),
                 leading: CircleAvatar(
-                  backgroundColor: isStarted ? Colors.green : Colors.blue,
-                  child: Icon(
-                    isStarted ? Icons.directions_car : Icons.check_circle,
-                    color: Colors.white,
-                  ),
+                  backgroundColor: isStarted ? AppTheme.success : AppTheme.primary,
+                  child: Icon(isStarted ? Icons.directions_car_rounded : Icons.check_circle_rounded, color: Colors.white, size: 24),
                 ),
                 title: Text(
                   isStarted ? 'Ride started' : 'Ride finished',
-                  style: TextStyle(
-                    fontWeight: read ? FontWeight.normal : FontWeight.bold,
+                  style: TextStyle(fontWeight: read ? FontWeight.normal : FontWeight.w600, color: AppTheme.textPrimary),
+                ),
+                subtitle: Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                    childName != null && childName.isNotEmpty ? '$message — $driverName' : '$message — $driverName',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(color: AppTheme.textSecondary, fontSize: 13),
                   ),
                 ),
-                subtitle: Text(
-                  childName != null && childName.isNotEmpty
-                      ? '$message — $driverName'
-                      : '$message — $driverName',
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                ),
                 trailing: timestamp != null && timestamp is Timestamp
-                    ? Text(
-                        _formatTimestamp(timestamp as Timestamp),
-                        style: const TextStyle(fontSize: 12, color: Colors.grey),
-                      )
+                    ? Text(_formatTimestamp(timestamp as Timestamp), style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary))
                     : null,
               ),
             );
@@ -214,44 +227,104 @@ class _ParentDashboardState extends State<ParentDashboard> {
     return '${d.day}/${d.month}/${d.year}';
   }
 
-  // ================= DASHBOARD =================
   Widget _dashboard(Map<String, dynamic> data) {
     final children = List<Map<String, dynamic>>.from(data['children'] ?? []);
+    final padding = AppTheme.contentPadding(context);
+
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Text(data['name'] ?? '', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-        Text("CNIC: ${data['cnic'] ?? ''}"),
-        Text("Phone: ${data['phone'] ?? ''}"),
-        const SizedBox(height: 24),
-        ...children.asMap().entries.map((e) {
-          final i = e.key + 1;
-          final child = e.value;
-          return Card(
-            margin: const EdgeInsets.only(bottom: 16),
-            child: Padding(
-              padding: const EdgeInsets.all(16),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text("Child $i", style: const TextStyle(fontWeight: FontWeight.bold)),
-                if ((child['photo'] ?? '').toString().isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Image.network(child['photo'], height: 160, fit: BoxFit.cover),
-                  ),
-                Text("Name: ${child['name'] ?? ''}"),
-                Text("School: ${child['school'] ?? ''}"),
-                Text("Route: ${child['route'] ?? ''}"),
-                Text("School Timing: ${child['schoolOn'] ?? ''} - ${child['schoolOff'] ?? ''}"),
-                Text("Assigned Driver: ${child['assignedDriverName'] ?? 'Not Assigned'}"),
-              ]),
+      padding: padding,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: AppTheme.maxContentWidth),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Card(
+              child: Padding(
+                padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(data['name'] ?? 'Parent', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+                    const SizedBox(height: 4),
+                    Text('CNIC: ${data['cnic'] ?? '—'}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
+                    Text('Phone: ${data['phone'] ?? '—'}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
+                  ],
+                ),
+              ),
             ),
-          );
-        })
-      ]),
+            SizedBox(height: AppTheme.verticalSpacing(context) * 2),
+            Text('Your children', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+            SizedBox(height: AppTheme.verticalSpacing(context)),
+            if (children.isEmpty)
+              Card(
+                child: Padding(
+                  padding: EdgeInsets.all(AppTheme.horizontalPadding(context) * 1.5),
+                  child: Column(
+                    children: [
+                      Icon(Icons.child_care_rounded, size: 48, color: AppTheme.textSecondary.withOpacity(0.5)),
+                      const SizedBox(height: 12),
+                      Text('No children added', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary)),
+                      const SizedBox(height: 4),
+                      Text('Go to Children to add your first child.', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.textSecondary)),
+                    ],
+                  ),
+                ),
+              )
+            else
+              ...children.asMap().entries.map((e) {
+                final i = e.key + 1;
+                final child = e.value;
+                return Card(
+                  margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
+                  child: Padding(
+                    padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if ((child['photo'] ?? '').toString().isNotEmpty)
+                              ClipRRect(
+                                borderRadius: BorderRadius.circular(12),
+                                child: Image.network(child['photo'].toString(), height: 72, width: 72, fit: BoxFit.cover),
+                              )
+                            else
+                              CircleAvatar(
+                                radius: 36,
+                                backgroundColor: AppTheme.primary.withOpacity(0.15),
+                                child: Icon(Icons.person_rounded, size: 36, color: AppTheme.primary),
+                              ),
+                            SizedBox(width: AppTheme.horizontalPadding(context)),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text('Child $i', style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                                  const SizedBox(height: 2),
+                                  Text(child['name']?.toString() ?? '—', style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: AppTheme.textPrimary)),
+                                  const SizedBox(height: 4),
+                                  Text('${child['school'] ?? '—'} • ${child['route'] ?? '—'}', style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
+                                  Text('Timing: ${child['schoolOn'] ?? '—'} – ${child['schoolOff'] ?? '—'}', style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+                                  const SizedBox(height: 4),
+                                  Text('Driver: ${child['assignedDriverName'] ?? 'Not assigned'}', style: TextStyle(fontSize: 13, color: (child['assignedDriverName'] ?? '').toString().isEmpty ? AppTheme.warning : AppTheme.textSecondary)),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }),
+            SizedBox(height: MediaQuery.paddingOf(context).bottom + 24),
+          ],
+        ),
+      ),
     );
   }
 
-  // ================= CHILD FORM PAGE =================
   Widget _childrenPage(Map<String, dynamic> data) {
     final parentChildren = List<Map<String, dynamic>>.from(data['children'] ?? []);
 
@@ -263,23 +336,18 @@ class _ParentDashboardState extends State<ParentDashboard> {
           _childRouteDetailsController.text.isEmpty ||
           _childSchoolOnController.text.isEmpty ||
           _childSchoolOffController.text.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Please fill all fields")),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please fill all fields'), behavior: SnackBarBehavior.floating));
         return;
       }
-
       setState(() => _isUploading = true);
 
       String photoUrl = '';
       if (_childImageBytes != null) {
-        final ref = FirebaseStorage.instance
-            .ref()
-            .child('child_photos/${DateTime.now().millisecondsSinceEpoch}.jpg');
+        final ref = FirebaseStorage.instance.ref().child('child_photos/${DateTime.now().millisecondsSinceEpoch}.jpg');
         await ref.putData(_childImageBytes!);
         photoUrl = await ref.getDownloadURL();
       } else if (_editingChildIndex != null) {
-        photoUrl = parentChildren[_editingChildIndex!]['photo'] ?? '';
+        photoUrl = parentChildren[_editingChildIndex!]['photo']?.toString() ?? '';
       }
 
       String? assignedDriver;
@@ -288,43 +356,42 @@ class _ParentDashboardState extends State<ParentDashboard> {
 
       if (_editingChildIndex != null) {
         final old = parentChildren[_editingChildIndex!];
-        childId = old['id'];
-        assignedDriver = old['assignedDriver'];
-        assignedDriverName = old['assignedDriverName'];
+        childId = old['id'] as String? ?? '';
+        assignedDriver = old['assignedDriver'] as String?;
+        assignedDriverName = old['assignedDriverName'] as String?;
         parentChildren[_editingChildIndex!] = {
-          "id": childId,
-          "name": _childNameController.text,
-          "age": _childAgeController.text,
-          "school": _childSchool,
-          "route": _childRoute,
-          "routeDetails": _childRouteDetailsController.text,
-          "schoolOn": _childSchoolOnController.text,
-          "schoolOff": _childSchoolOffController.text,
-          "photo": photoUrl,
-          "assignedDriver": assignedDriver,
-          "assignedDriverName": assignedDriverName,
+          'id': childId,
+          'name': _childNameController.text,
+          'age': _childAgeController.text,
+          'school': _childSchool,
+          'route': _childRoute,
+          'routeDetails': _childRouteDetailsController.text,
+          'schoolOn': _childSchoolOnController.text,
+          'schoolOff': _childSchoolOffController.text,
+          'photo': photoUrl,
+          'assignedDriver': assignedDriver,
+          'assignedDriverName': assignedDriverName,
         };
       } else {
         childId = _firestore.collection('children').doc().id;
         parentChildren.add({
-          "id": childId,
-          "name": _childNameController.text,
-          "age": _childAgeController.text,
-          "school": _childSchool,
-          "route": _childRoute,
-          "routeDetails": _childRouteDetailsController.text,
-          "schoolOn": _childSchoolOnController.text,
-          "schoolOff": _childSchoolOffController.text,
-          "photo": photoUrl,
-          "assignedDriver": null,
-          "assignedDriverName": null,
+          'id': childId,
+          'name': _childNameController.text,
+          'age': _childAgeController.text,
+          'school': _childSchool,
+          'route': _childRoute,
+          'routeDetails': _childRouteDetailsController.text,
+          'schoolOn': _childSchoolOnController.text,
+          'schoolOff': _childSchoolOffController.text,
+          'photo': photoUrl,
+          'assignedDriver': null,
+          'assignedDriverName': null,
         });
       }
 
-      await _firestore.collection('users').doc(_currentUser.uid).set({
-        "children": parentChildren
-      }, SetOptions(merge: true));
+      await _firestore.collection('users').doc(_currentUser.uid).set({'children': parentChildren}, SetOptions(merge: true));
 
+      final wasUpdate = _editingChildIndex != null;
       setState(() {
         _childImageBytes = null;
         _editingChildIndex = null;
@@ -337,145 +404,177 @@ class _ParentDashboardState extends State<ParentDashboard> {
         _childSchoolOffController.clear();
         _isUploading = false;
       });
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(wasUpdate ? 'Child updated' : 'Child added'), backgroundColor: AppTheme.success, behavior: SnackBarBehavior.floating));
+      }
     }
 
+    final padding = AppTheme.contentPadding(context);
     return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          GestureDetector(
-            onTap: _pickChildImage,
-            child: CircleAvatar(
-              radius: 60,
-              backgroundImage: _childImageBytes != null
-                  ? MemoryImage(_childImageBytes!)
-                  : (_editingChildIndex != null &&
-                          (parentChildren[_editingChildIndex!]['photo'] ?? '').isNotEmpty
-                      ? NetworkImage(parentChildren[_editingChildIndex!]['photo']) as ImageProvider
-                      : null),
-              child: _childImageBytes == null &&
-                      (_editingChildIndex == null || (parentChildren[_editingChildIndex!]['photo'] ?? '').isEmpty)
-                  ? const Icon(Icons.camera_alt)
-                  : null,
-            ),
-          ),
-          const SizedBox(height: 12),
-          TextField(controller: _childNameController, decoration: const InputDecoration(labelText: "Name")),
-          TextField(controller: _childAgeController, decoration: const InputDecoration(labelText: "Age")),
-          const SizedBox(height: 12),
-          StreamBuilder<QuerySnapshot>(
-            stream: _firestore.collection('schools').snapshots(),
-            builder: (context, snap) {
-              if (!snap.hasData) return const CircularProgressIndicator();
-              final schoolList = snap.data!.docs
-                  .map((d) => (d.data() as Map<String, dynamic>)['name'].toString())
-                  .toList();
-              return DropdownButtonFormField<String>(
-                value: _childSchool,
-                hint: const Text("Select School"),
-                items: schoolList.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-                onChanged: (v) => setState(() => _childSchool = v),
-              );
-            },
-          ),
-          const SizedBox(height: 12),
-          StreamBuilder<QuerySnapshot>(
-            stream: _firestore.collection('routes').snapshots(),
-            builder: (context, snap) {
-              if (!snap.hasData) return const CircularProgressIndicator();
-              final routeList = snap.data!.docs
-                  .map((d) => (d.data() as Map<String, dynamic>)['name'].toString())
-                  .toList();
-              return DropdownButtonFormField<String>(
-                value: _childRoute,
-                hint: const Text("Select Route"),
-                items: routeList.map((r) => DropdownMenuItem(value: r, child: Text(r))).toList(),
-                onChanged: (v) => setState(() => _childRoute = v),
-              );
-            },
-          ),
-          TextField(controller: _childRouteDetailsController, decoration: const InputDecoration(labelText: "Route Details")),
-          TextField(controller: _childSchoolOnController, decoration: const InputDecoration(labelText: "School On Timing")),
-          TextField(controller: _childSchoolOffController, decoration: const InputDecoration(labelText: "School Off Timing")),
-          const SizedBox(height: 16),
-          _isUploading
-              ? const CircularProgressIndicator()
-              : ElevatedButton(
-                  onPressed: saveChild,
-                  child: Text(_editingChildIndex != null ? "Update Child" : "Add Child"),
-                ),
-          const SizedBox(height: 24),
-          const Text("Added Children:", style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          ...parentChildren.asMap().entries.map((entry) {
-            final i = entry.key;
-            final child = entry.value;
-            return Card(
-              margin: const EdgeInsets.only(bottom: 12),
-              child: ListTile(
-                leading: child['photo'] != null && child['photo'] != ''
-                    ? Image.network(child['photo'], width: 50, fit: BoxFit.cover)
-                    : const Icon(Icons.child_care),
-                title: Text(child['name'] ?? ''),
-                subtitle: Text("${child['school'] ?? ''} - ${child['route'] ?? ''}"),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      icon: const Icon(Icons.edit, color: Colors.blue),
-                      onPressed: () {
-                        setState(() {
-                          _editingChildIndex = i;
-                          _childNameController.text = child['name'] ?? '';
-                          _childAgeController.text = child['age'] ?? '';
-                          _childRouteDetailsController.text = child['routeDetails'] ?? '';
-                          _childSchoolOnController.text = child['schoolOn'] ?? '';
-                          _childSchoolOffController.text = child['schoolOff'] ?? '';
-                          _childSchool = child['school'];
-                          _childRoute = child['route'];
-                          _childImageBytes = null;
-                        });
-                      },
-                    ),
-                    IconButton(
-                      icon: const Icon(Icons.delete, color: Colors.red),
-                      onPressed: () async {
-                        parentChildren.removeAt(i);
-                        await _firestore.collection('users').doc(_currentUser.uid).set({
-                          "children": parentChildren
-                        }, SetOptions(merge: true));
-                      },
-                    ),
-                  ],
+      padding: padding,
+      child: ConstrainedBox(
+        constraints: BoxConstraints(maxWidth: AppTheme.maxContentWidth),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Center(
+              child: GestureDetector(
+                onTap: _pickChildImage,
+                child: CircleAvatar(
+                  radius: 56,
+                  backgroundImage: _childImageBytes != null
+                      ? MemoryImage(_childImageBytes!)
+                      : (_editingChildIndex != null && (parentChildren[_editingChildIndex!]['photo'] ?? '').toString().isNotEmpty
+                          ? NetworkImage(parentChildren[_editingChildIndex!]['photo'].toString()) as ImageProvider
+                          : null),
+                  backgroundColor: AppTheme.primary.withOpacity(0.1),
+                  child: _childImageBytes == null && (_editingChildIndex == null || (parentChildren[_editingChildIndex!]['photo'] ?? '').toString().isEmpty)
+                      ? Icon(Icons.camera_alt_rounded, size: 40, color: AppTheme.primary.withOpacity(0.6))
+                      : null,
                 ),
               ),
-            );
-          }).toList(),
-        ],
+            ),
+            SizedBox(height: AppTheme.verticalSpacing(context) * 2),
+            TextField(controller: _childNameController, decoration: const InputDecoration(labelText: 'Name'), textInputAction: TextInputAction.next),
+            SizedBox(height: AppTheme.verticalSpacing(context)),
+            TextField(controller: _childAgeController, decoration: const InputDecoration(labelText: 'Age'), keyboardType: TextInputType.number, textInputAction: TextInputAction.next),
+            SizedBox(height: AppTheme.verticalSpacing(context)),
+            StreamBuilder<QuerySnapshot>(
+              stream: _firestore.collection('schools').snapshots(),
+              builder: (context, snap) {
+                if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+                final schoolList = snap.data!.docs.map((d) => (d.data() as Map<String, dynamic>)['name'].toString()).toList();
+                return DropdownButtonFormField<String>(
+                  value: _childSchool,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'School'),
+                  items: schoolList.map((s) => DropdownMenuItem(value: s, child: Text(s, overflow: TextOverflow.ellipsis, maxLines: 1))).toList(),
+                  onChanged: (v) => setState(() => _childSchool = v),
+                );
+              },
+            ),
+            SizedBox(height: AppTheme.verticalSpacing(context)),
+            StreamBuilder<QuerySnapshot>(
+              stream: _firestore.collection('routes').snapshots(),
+              builder: (context, snap) {
+                if (!snap.hasData) return const Center(child: CircularProgressIndicator());
+                final routeList = snap.data!.docs.map((d) => (d.data() as Map<String, dynamic>)['name'].toString()).toList();
+                return DropdownButtonFormField<String>(
+                  value: _childRoute,
+                  isExpanded: true,
+                  decoration: const InputDecoration(labelText: 'Route'),
+                  items: routeList.map((r) => DropdownMenuItem(value: r, child: Text(r, overflow: TextOverflow.ellipsis, maxLines: 1))).toList(),
+                  onChanged: (v) => setState(() => _childRoute = v),
+                );
+              },
+            ),
+            SizedBox(height: AppTheme.verticalSpacing(context)),
+            TextField(controller: _childRouteDetailsController, decoration: const InputDecoration(labelText: 'Route details'), textInputAction: TextInputAction.next),
+            SizedBox(height: AppTheme.verticalSpacing(context)),
+            TextField(controller: _childSchoolOnController, decoration: const InputDecoration(labelText: 'School on time'), textInputAction: TextInputAction.next),
+            SizedBox(height: AppTheme.verticalSpacing(context)),
+            TextField(controller: _childSchoolOffController, decoration: const InputDecoration(labelText: 'School off time'), textInputAction: TextInputAction.done),
+            SizedBox(height: AppTheme.verticalSpacing(context) * 2),
+            if (_isUploading)
+              const Center(child: CircularProgressIndicator())
+            else
+              FilledButton.icon(
+                onPressed: saveChild,
+                icon: Icon(_editingChildIndex != null ? Icons.edit_rounded : Icons.add_rounded, size: 20),
+                label: Text(_editingChildIndex != null ? 'Update child' : 'Add child'),
+              ),
+            SizedBox(height: AppTheme.verticalSpacing(context) * 2),
+            Text('Added children', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
+            SizedBox(height: AppTheme.verticalSpacing(context)),
+            ...parentChildren.asMap().entries.map((entry) {
+              final i = entry.key;
+              final child = entry.value;
+              final photo = child['photo']?.toString() ?? '';
+              return Card(
+                margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
+                child: ListTile(
+                  contentPadding: EdgeInsets.symmetric(horizontal: AppTheme.horizontalPadding(context), vertical: 8),
+                  leading: photo.isNotEmpty
+                      ? ClipRRect(borderRadius: BorderRadius.circular(8), child: Image.network(photo, width: 48, height: 48, fit: BoxFit.cover))
+                      : CircleAvatar(backgroundColor: AppTheme.primary.withOpacity(0.15), child: const Icon(Icons.child_care_rounded, color: AppTheme.primary)),
+                  title: Text(child['name']?.toString() ?? '—', style: const TextStyle(fontWeight: FontWeight.w500)),
+                  subtitle: Text('${child['school'] ?? '—'} • ${child['route'] ?? '—'}', style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        icon: const Icon(Icons.edit_rounded, color: AppTheme.primary),
+                        onPressed: () {
+                          setState(() {
+                            _editingChildIndex = i;
+                            _childNameController.text = child['name']?.toString() ?? '';
+                            _childAgeController.text = child['age']?.toString() ?? '';
+                            _childRouteDetailsController.text = child['routeDetails']?.toString() ?? '';
+                            _childSchoolOnController.text = child['schoolOn']?.toString() ?? '';
+                            _childSchoolOffController.text = child['schoolOff']?.toString() ?? '';
+                            _childSchool = child['school']?.toString();
+                            _childRoute = child['route']?.toString();
+                            _childImageBytes = null;
+                          });
+                        },
+                      ),
+                      IconButton(
+                        icon: const Icon(Icons.delete_rounded, color: AppTheme.error),
+                        onPressed: () async {
+                          parentChildren.removeAt(i);
+                          await _firestore.collection('users').doc(_currentUser.uid).set({'children': parentChildren}, SetOptions(merge: true));
+                          setState(() {});
+                        },
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            }),
+            SizedBox(height: MediaQuery.paddingOf(context).bottom + 24),
+          ],
+        ),
       ),
     );
   }
 
-  // ================= DRIVERS PAGE =================
   Widget _driversPage(Map<String, dynamic> parentData) {
     final parentChildren = List<Map<String, dynamic>>.from(parentData['children'] ?? []);
-    if (parentChildren.isEmpty) return const Center(child: Text("No children added yet."));
+    if (parentChildren.isEmpty) {
+      return Center(
+        child: Padding(
+          padding: AppTheme.contentPadding(context),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Icon(Icons.people_outline_rounded, size: 64, color: AppTheme.textSecondary.withOpacity(0.5)),
+              const SizedBox(height: 16),
+              Text('No children added yet', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppTheme.textSecondary)),
+              const SizedBox(height: 8),
+              Text('Add a child first, then request a driver for their route.', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary)),
+            ],
+          ),
+        ),
+      );
+    }
 
     return ListView.builder(
-      padding: const EdgeInsets.all(16),
+      padding: AppTheme.contentPadding(context),
       itemCount: parentChildren.length,
       itemBuilder: (context, index) {
         final child = parentChildren[index];
-        final childId = child['id'] ?? '';
-        final childName = child['name'] ?? '';
-        final childSchool = child['school'] ?? '';
-        final childRoute = child['route'] ?? '';
+        final childId = child['id']?.toString() ?? '';
+        final childName = child['name']?.toString() ?? '';
+        final childSchool = child['school']?.toString() ?? '';
+        final childRoute = child['route']?.toString() ?? '';
 
         return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text("Child ${index + 1}: $childName", style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
+            Padding(
+              padding: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
+              child: Text('$childName', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600)),
+            ),
             StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
               stream: _firestore
                   .collection('requests')
@@ -483,11 +582,10 @@ class _ParentDashboardState extends State<ParentDashboard> {
                   .where('status', whereIn: ['pending', 'approved'])
                   .snapshots(),
               builder: (context, snapshot) {
-                if (!snapshot.hasData) return const CircularProgressIndicator();
+                if (!snapshot.hasData) return const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()));
 
                 final requests = snapshot.data!.docs;
                 QueryDocumentSnapshot<Map<String, dynamic>>? approvedRequest;
-
                 try {
                   approvedRequest = requests.firstWhere((r) {
                     final data = r.data();
@@ -499,48 +597,52 @@ class _ParentDashboardState extends State<ParentDashboard> {
 
                 if (approvedRequest != null) {
                   final driverId = approvedRequest.data()['driverId'] as String?;
-                  if (driverId == null || driverId.isEmpty) return const Text("Driver not assigned yet");
+                  if (driverId == null || driverId.isEmpty) return const SizedBox(height: 48, child: Center(child: Text('Driver not assigned yet')));
 
                   return FutureBuilder<DocumentSnapshot<Map<String, dynamic>>>(
                     future: _firestore.collection('users').doc(driverId).get(),
                     builder: (context, driverSnap) {
-                      if (!driverSnap.hasData) return const CircularProgressIndicator();
+                      if (!driverSnap.hasData) return const Center(child: CircularProgressIndicator());
                       final driverData = driverSnap.data?.data();
-                      if (driverData == null) return const Text("Driver data not found");
+                      if (driverData == null) return const SizedBox();
 
-                      // ==== UPDATE CHILD ASSIGNED DRIVER ==== //
-                      _updateAssignedDriver(driverId, driverData['name'], childId);
+                      _updateAssignedDriver(driverId, driverData['name']?.toString() ?? '', childId);
 
                       return Card(
-                        margin: const EdgeInsets.only(bottom: 16),
+                        margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context) * 2),
                         child: Padding(
-                          padding: const EdgeInsets.all(16),
+                          padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if ((child['photo'] ?? '').isNotEmpty)
-                                Image.network(child['photo'], height: 120, fit: BoxFit.cover),
-                              const SizedBox(height: 8),
-                              Text("Driver Name: ${driverData['name'] ?? ''}"),
-                              Text("CNIC: ${driverData['cnic'] ?? ''}"),
-                              Text("License: ${driverData['licenseNumber'] ?? ''}"),
-                              Text("Vehicle: ${driverData['vehicleName'] ?? ''} (${driverData['vehicleNumber'] ?? ''})"),
-                              Text("School: ${driverData['school'] ?? ''}"),
-                              Text("Route: ${driverData['route'] ?? ''}"),
-                              Text("Seats: ${driverData['seats'] ?? ''}"),
-                              const SizedBox(height: 8),
-                              const Text("This driver has been assigned to your child"),
-                              const SizedBox(height: 12),
-                              ElevatedButton.icon(
-                                onPressed: () {
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(
-                                      builder: (context) => DriverLocationScreen(childId: childId),
-                                    ),
-                                  );
-                                },
-                                icon: const Icon(Icons.location_on),
-                                label: const Text("Track Driver"),
+                              if ((child['photo'] ?? '').toString().isNotEmpty)
+                                ClipRRect(
+                                  borderRadius: BorderRadius.circular(12),
+                                  child: Image.network(child['photo'].toString(), height: 100, width: double.infinity, fit: BoxFit.cover),
+                                ),
+                              if ((child['photo'] ?? '').toString().isNotEmpty) SizedBox(height: AppTheme.verticalSpacing(context)),
+                              _driverInfoRow(Icons.person_rounded, 'Driver', driverData['name']?.toString() ?? '—'),
+                              _driverInfoRow(Icons.badge_rounded, 'CNIC', driverData['cnic']?.toString() ?? '—'),
+                              _driverInfoRow(Icons.drive_eta_rounded, 'License', driverData['licenseNumber']?.toString() ?? '—'),
+                              _driverInfoRow(Icons.directions_car_rounded, 'Vehicle', '${driverData['vehicleName'] ?? '—'} (${driverData['vehicleNumber'] ?? '—'})'),
+                              _driverInfoRow(Icons.school_rounded, 'School', driverData['school']?.toString() ?? '—'),
+                              _driverInfoRow(Icons.route_rounded, 'Route', driverData['route']?.toString() ?? '—'),
+                              _driverInfoRow(Icons.event_seat_rounded, 'Seats', driverData['seats']?.toString() ?? '—'),
+                              SizedBox(height: AppTheme.verticalSpacing(context)),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                decoration: BoxDecoration(color: AppTheme.success.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
+                                child: Row(children: [
+                                  const Icon(Icons.check_circle_rounded, color: AppTheme.success, size: 20),
+                                  const SizedBox(width: 8),
+                                  Expanded(child: Text('This driver is assigned to your child', style: TextStyle(fontSize: 13, color: AppTheme.textSecondary))),
+                                ]),
+                              ),
+                              SizedBox(height: AppTheme.verticalSpacing(context)),
+                              FilledButton.icon(
+                                onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (context) => DriverLocationScreen(childId: childId))),
+                                icon: const Icon(Icons.location_on_rounded, size: 20),
+                                label: const Text('Track driver'),
                               ),
                             ],
                           ),
@@ -550,61 +652,64 @@ class _ParentDashboardState extends State<ParentDashboard> {
                   );
                 }
 
-                // ===== AVAILABLE DRIVERS =====
                 return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
                   stream: _firestore.collection('users').where('role', isEqualTo: 'driver').snapshots(),
                   builder: (context, driversSnap) {
-                    if (!driversSnap.hasData) return const CircularProgressIndicator();
-
+                    if (!driversSnap.hasData) return const Center(child: CircularProgressIndicator());
                     final drivers = driversSnap.data!.docs.where((doc) {
                       final d = doc.data();
                       return d['school'] == childSchool && d['route'] == childRoute;
                     }).toList();
 
-                    if (drivers.isEmpty) return const Text("No available drivers for this child's route.");
+                    if (drivers.isEmpty) {
+                      return Card(
+                        margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context) * 2),
+                        child: Padding(
+                          padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
+                          child: Text('No drivers available for this route yet.', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary)),
+                        ),
+                      );
+                    }
 
                     return Column(
                       children: drivers.map((doc) {
                         final d = doc.data();
                         return Card(
-                          margin: const EdgeInsets.only(bottom: 12),
+                          margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
                           child: Padding(
-                            padding: const EdgeInsets.all(12),
+                            padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 if ((d['profilePic'] ?? '').toString().isNotEmpty)
-                                  Image.network(d['profilePic'], height: 80, fit: BoxFit.cover),
-                                const SizedBox(height: 6),
-                                Text("Name: ${d['name'] ?? ''}"),
-                                Text("CNIC: ${d['cnic'] ?? ''}"),
-                                Text("License: ${d['licenseNumber'] ?? ''}"),
-                                Text("Vehicle: ${d['vehicleName'] ?? ''} (${d['vehicleNumber'] ?? ''})"),
-                                Text("School: ${d['school'] ?? ''}"),
-                                Text("Route: ${d['route'] ?? ''}"),
-                                Text("Seats: ${d['seats'] ?? ''}"),
-                                const SizedBox(height: 6),
-                                ElevatedButton(
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(8),
+                                    child: Image.network(d['profilePic'].toString(), height: 72, width: double.infinity, fit: BoxFit.cover),
+                                  ),
+                                if ((d['profilePic'] ?? '').toString().isNotEmpty) SizedBox(height: AppTheme.verticalSpacing(context)),
+                                _driverInfoRow(Icons.person_rounded, 'Name', d['name']?.toString() ?? '—'),
+                                _driverInfoRow(Icons.badge_rounded, 'CNIC', d['cnic']?.toString() ?? '—'),
+                                _driverInfoRow(Icons.directions_car_rounded, 'Vehicle', '${d['vehicleName'] ?? '—'} (${d['vehicleNumber'] ?? '—'})'),
+                                _driverInfoRow(Icons.route_rounded, 'Route', d['route']?.toString() ?? '—'),
+                                SizedBox(height: AppTheme.verticalSpacing(context)),
+                                FilledButton(
                                   onPressed: () async {
-                                    final adminSnapshot = await _firestore
-                                        .collection('users')
-                                        .where('role', isEqualTo: 'admin')
-                                        .get();
+                                    final adminSnapshot = await _firestore.collection('users').where('role', isEqualTo: 'admin').get();
                                     for (var adminDoc in adminSnapshot.docs) {
                                       await _firestore.collection('requests').add({
-                                        "parentId": _currentUser.uid,
-                                        "driverId": doc.id,
-                                        "childIds": [childId],
-                                        "status": "pending",
-                                        "adminId": adminDoc.id,
-                                        "timestamp": FieldValue.serverTimestamp(),
+                                        'parentId': _currentUser.uid,
+                                        'driverId': doc.id,
+                                        'childIds': [childId],
+                                        'status': 'pending',
+                                        'adminId': adminDoc.id,
+                                        'timestamp': FieldValue.serverTimestamp(),
                                       });
                                     }
-                                    ScaffoldMessenger.of(context).showSnackBar(
-                                      const SnackBar(content: Text("Request sent to admin for approval")),
-                                    );
+                                    if (mounted) {
+                                      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Request sent to admin'), backgroundColor: AppTheme.success, behavior: SnackBarBehavior.floating));
+                                    }
                                   },
-                                  child: const Text("Request Driver"),
+                                  child: const Text('Request driver'),
                                 ),
                               ],
                             ),
@@ -616,10 +721,25 @@ class _ParentDashboardState extends State<ParentDashboard> {
                 );
               },
             ),
-            const SizedBox(height: 24),
+            SizedBox(height: AppTheme.verticalSpacing(context) * 2),
           ],
         );
       },
+    );
+  }
+
+  Widget _driverInfoRow(IconData icon, String label, String value) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context) * 0.5),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: AppTheme.textSecondary),
+          const SizedBox(width: 8),
+          Text('$label: ', style: const TextStyle(fontSize: 13, color: AppTheme.textSecondary)),
+          Expanded(child: Text(value, style: const TextStyle(fontSize: 13, color: AppTheme.textPrimary))),
+        ],
+      ),
     );
   }
 
@@ -634,15 +754,24 @@ class _ParentDashboardState extends State<ParentDashboard> {
     }
   }
 
-  // ================= BUILD =================
+  static const List<_NavItem> _navItems = [
+    _NavItem('Personal info', Icons.person_rounded),
+    _NavItem('Notifications', Icons.notifications_rounded),
+    _NavItem('Dashboard', Icons.dashboard_rounded),
+    _NavItem('Drivers', Icons.people_rounded),
+    _NavItem('Children', Icons.child_care_rounded),
+    _NavItem('Payments', Icons.payment_rounded),
+    _NavItem('Reviews', Icons.star_rounded),
+  ];
+
   @override
   Widget build(BuildContext context) {
     return StreamBuilder<DocumentSnapshot<Map<String, dynamic>>>(
       stream: _firestore.collection('users').doc(_currentUser.uid).snapshots(),
       builder: (c, s) {
         if (!s.hasData) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-
         final data = s.data!.data() ?? {};
+        final parentName = data['name']?.toString() ?? '';
 
         final pages = [
           _personalInfo(data),
@@ -650,44 +779,93 @@ class _ParentDashboardState extends State<ParentDashboard> {
           _dashboard(data),
           _driversPage(data),
           _childrenPage(data),
-          const Center(child: Text("Payments")),
-          const Center(child: Text("Reviews")),
+          Center(child: _emptyPage('Payments', Icons.payment_rounded)),
+          Center(child: _emptyPage('Reviews', Icons.star_rounded)),
         ];
 
         return Scaffold(
-          appBar: AppBar(title: const Text("Parent Dashboard")),
+          body: SafeArea(child: pages[_selectedIndex]),
+          appBar: AppBar(title: Text(_navItems[_selectedIndex].label)),
           drawer: Drawer(
-            child: ListView(children: [
-              DrawerHeader(child: Text(data['name'] ?? 'Parent', style: const TextStyle(fontSize: 20))),
-              _tile("Personal Info", 0),
-              _tile("Notifications", 1),
-              _tile("Dashboard", 2),
-              _tile("Drivers", 3),
-              _tile("Children", 4),
-              _tile("Payments", 5),
-              _tile("Reviews", 6),
-              ListTile(
-                title: const Text("Logout"),
-                onTap: () async {
-                  await FirebaseAuth.instance.signOut();
-                  Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
-                },
-              )
-            ]),
+            child: SafeArea(
+              child: Column(
+                children: [
+                  Container(
+                    width: double.infinity,
+                    padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
+                    color: AppTheme.primary,
+                    child: Column(
+                      children: [
+                        const SizedBox(height: 16),
+                        CircleAvatar(
+                          radius: 40,
+                          backgroundColor: Colors.white24,
+                          child: Text(parentName.isEmpty ? '?' : parentName[0].toUpperCase(), style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w600, color: Colors.white)),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(parentName.isEmpty ? 'Parent' : parentName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.white)),
+                        const SizedBox(height: 4),
+                        Text(data['phone']?.toString() ?? '', style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.9))),
+                        const SizedBox(height: 16),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView(
+                      padding: EdgeInsets.symmetric(vertical: AppTheme.verticalSpacing(context)),
+                      children: [
+                        ..._navItems.asMap().entries.map((e) {
+                          final selected = _selectedIndex == e.key;
+                          return ListTile(
+                            leading: Icon(e.value.icon, color: selected ? AppTheme.primary : AppTheme.textSecondary, size: 24),
+                            title: Text(e.value.label, style: TextStyle(fontWeight: selected ? FontWeight.w600 : FontWeight.normal, color: selected ? AppTheme.primary : AppTheme.textPrimary)),
+                            selected: selected,
+                            onTap: () {
+                              setState(() => _selectedIndex = e.key);
+                              Navigator.pop(context);
+                            },
+                          );
+                        }),
+                        const Divider(),
+                        ListTile(
+                          leading: const Icon(Icons.logout_rounded, color: AppTheme.error),
+                          title: const Text('Logout', style: TextStyle(fontWeight: FontWeight.w500, color: AppTheme.error)),
+                          onTap: () async {
+                            await FirebaseAuth.instance.signOut();
+                            if (context.mounted) {
+                              Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
           ),
-          body: pages[_selectedIndex],
         );
       },
     );
   }
 
-  ListTile _tile(String t, int i) => ListTile(
-        title: Text(t),
-        selected: _selectedIndex == i,
-        onTap: () {
-          setState(() => _selectedIndex = i);
-          Navigator.pop(context);
-        },
-      );
+  Widget _emptyPage(String title, IconData icon) {
+    return Padding(
+      padding: AppTheme.contentPadding(context),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(icon, size: 56, color: AppTheme.textSecondary.withOpacity(0.5)),
+          const SizedBox(height: 16),
+          Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppTheme.textSecondary)),
+        ],
+      ),
+    );
+  }
 }
 
+class _NavItem {
+  final String label;
+  final IconData icon;
+  const _NavItem(this.label, this.icon);
+}
