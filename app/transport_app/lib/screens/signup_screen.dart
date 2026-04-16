@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../theme/app_theme.dart';
 
 class SignupScreen extends StatefulWidget {
   const SignupScreen({super.key});
@@ -23,8 +24,17 @@ class _SignupScreenState extends State<SignupScreen> {
   bool _isLoading = false;
   bool _hidePassword = true;
   bool _hideConfirmPassword = true;
+  bool _animateIn = false;
 
   String? _selectedRole;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _animateIn = true);
+    });
+  }
 
   // ---------------- VALIDATIONS ----------------
 
@@ -130,16 +140,7 @@ class _SignupScreenState extends State<SignupScreen> {
 
     return Scaffold(
       body: Container(
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Theme.of(context).colorScheme.primary.withOpacity(0.8),
-              Theme.of(context).colorScheme.primary.withOpacity(0.1),
-            ],
-          ),
-        ),
+        decoration: BoxDecoration(gradient: AppTheme.pageGradient),
         child: SafeArea(
           child: SingleChildScrollView(
             padding: EdgeInsets.symmetric(horizontal: isMobile ? 24 : 48, vertical: 24),
@@ -149,23 +150,33 @@ class _SignupScreenState extends State<SignupScreen> {
                   const SizedBox(height: 24),
 
                   // Header
-                  Container(
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary,
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
-                          blurRadius: 20,
-                          offset: const Offset(0, 8),
+                  AnimatedScale(
+                    scale: _animateIn ? 1 : 0.92,
+                    duration: const Duration(milliseconds: 600),
+                    curve: Curves.easeOutBack,
+                    child: Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: [
+                            Theme.of(context).colorScheme.primary,
+                            AppTheme.primaryDark,
+                          ],
                         ),
-                      ],
-                    ),
-                    child: Icon(
-                      Icons.person_add,
-                      size: 48,
-                      color: Theme.of(context).colorScheme.onPrimary,
+                        borderRadius: BorderRadius.circular(22),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        Icons.person_add,
+                        size: 48,
+                        color: Theme.of(context).colorScheme.onPrimary,
+                      ),
                     ),
                   ),
 
@@ -191,26 +202,23 @@ class _SignupScreenState extends State<SignupScreen> {
                   const SizedBox(height: 32),
 
                   // Form
-                  Container(
-                    constraints: BoxConstraints(maxWidth: isMobile ? double.infinity : 500),
-                    padding: const EdgeInsets.all(28),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surface,
-                      borderRadius: BorderRadius.circular(20),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withOpacity(0.08),
-                          blurRadius: 24,
-                          offset: const Offset(0, 12),
-                        ),
-                      ],
-                    ),
-                    child: Form(
-                      key: _formKey,
-                      autovalidateMode: AutovalidateMode.onUserInteraction,
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
+                  AnimatedSlide(
+                    offset: _animateIn ? Offset.zero : const Offset(0, 0.08),
+                    duration: const Duration(milliseconds: 500),
+                    curve: Curves.easeOutCubic,
+                    child: AnimatedOpacity(
+                      opacity: _animateIn ? 1 : 0,
+                      duration: const Duration(milliseconds: 450),
+                      child: Container(
+                        constraints: BoxConstraints(maxWidth: isMobile ? double.infinity : 500),
+                        padding: const EdgeInsets.all(28),
+                        decoration: AppTheme.glassCardDecoration,
+                        child: Form(
+                          key: _formKey,
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
                           _label("Full Name"),
                           const SizedBox(height: 12),
                           TextFormField(
@@ -313,7 +321,9 @@ class _SignupScreenState extends State<SignupScreen> {
                                 ? const CircularProgressIndicator(strokeWidth: 2)
                                 : const Text("Create Account"),
                           ),
-                        ],
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),

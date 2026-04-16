@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:image_picker/image_picker.dart';
 import '../theme/app_theme.dart';
 import '../services/web_notifications.dart';
@@ -28,6 +29,74 @@ class _ParentDashboardState extends State<ParentDashboard> {
   bool _requestedWebNotificationPermission = false;
   bool _savingPersonalInfo = false;
   String? _requestingForChildId;
+
+  Widget _premiumCard({
+    required Widget child,
+    EdgeInsetsGeometry? margin,
+    EdgeInsetsGeometry? padding,
+    Color? baseColor,
+  }) {
+    return Container(
+      margin: margin,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [
+            baseColor ?? Colors.white,
+            AppTheme.subtleSurface.withOpacity(0.55),
+          ],
+        ),
+        border: Border.all(color: Colors.white.withOpacity(0.9)),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primary.withOpacity(0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: padding ?? EdgeInsets.all(AppTheme.horizontalPadding(context)),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  Widget _drawerNavTile({
+    required IconData icon,
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: selected ? AppTheme.primary.withOpacity(0.12) : Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: ListTile(
+        leading: Icon(
+          icon,
+          color: selected ? AppTheme.primary : AppTheme.textSecondary,
+          size: 22,
+        ),
+        title: Text(
+          label,
+          style: TextStyle(
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            color: selected ? AppTheme.primary : AppTheme.textPrimary,
+          ),
+        ),
+        onTap: onTap,
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -79,6 +148,88 @@ class _ParentDashboardState extends State<ParentDashboard> {
   String? _childSchool;
   String? _childRoute;
   int? _editingChildIndex;
+  static final RegExp _nameRegex = RegExp(r"^[A-Za-z ]{2,40}$");
+  static final RegExp _timeRegex =
+      RegExp(r"^(0?[1-9]|1[0-2]):[0-5][0-9]\s?(AM|PM|am|pm)$");
+
+  int? _parse12HourTimeToMinutes(String value) {
+    final normalized = value.trim().toUpperCase();
+    final match = RegExp(r"^(\d{1,2}):(\d{2})\s?(AM|PM)$").firstMatch(normalized);
+    if (match == null) return null;
+    final hourRaw = int.tryParse(match.group(1)!);
+    final minute = int.tryParse(match.group(2)!);
+    final period = match.group(3)!;
+    if (hourRaw == null || minute == null || hourRaw < 1 || hourRaw > 12) {
+      return null;
+    }
+    int hour24 = hourRaw % 12;
+    if (period == 'PM') hour24 += 12;
+    return hour24 * 60 + minute;
+  }
+
+  Future<void> _pickTimeForController(TextEditingController controller) async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.now(),
+      helpText: 'Select time',
+    );
+    if (picked == null) return;
+    final hour = picked.hourOfPeriod == 0 ? 12 : picked.hourOfPeriod;
+    final minute = picked.minute.toString().padLeft(2, '0');
+    final period = picked.period == DayPeriod.am ? 'AM' : 'PM';
+    setState(() {
+      controller.text = '$hour:$minute $period';
+    });
+  }
+
+  String? _validateChildForm() {
+    final name = _childNameController.text.trim();
+    final ageText = _childAgeController.text.trim();
+    final routeDetails = _childRouteDetailsController.text.trim();
+    final schoolOn = _childSchoolOnController.text.trim();
+    final schoolOff = _childSchoolOffController.text.trim();
+
+    if (_childSchool == null || _childRoute == null) {
+      return 'Please select school and route.';
+    }
+    if (!_nameRegex.hasMatch(name)) {
+      return 'Child name must be 2-40 letters only.';
+    }
+    final age = int.tryParse(ageText);
+    if (age == null || age < 3 || age > 18) {
+      return 'Age must be a valid number between 3 and 18.';
+    }
+    if (routeDetails.length < 5) {
+      return 'Route details must be at least 5 characters.';
+    }
+    if (!_timeRegex.hasMatch(schoolOn) || !_timeRegex.hasMatch(schoolOff)) {
+      return 'Use time format like 07:30 AM for school on/off.';
+    }
+    final onMinutes = _parse12HourTimeToMinutes(schoolOn);
+    final offMinutes = _parse12HourTimeToMinutes(schoolOff);
+    if (onMinutes == null || offMinutes == null) {
+      return 'Please choose valid school on/off times.';
+    }
+    if (offMinutes - onMinutes < 180) {
+      return 'School off time must be at least 3 hours after school on time.';
+    }
+    return null;
+  }
+
+  Future<Position?> _getCurrentParentPosition() async {
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return null;
+      }
+    }
+    return Geolocator.getCurrentPosition(
+      desiredAccuracy: LocationAccuracy.high,
+    );
+  }
 
   Future<void> _pickChildImage() async {
     final picker = ImagePicker();
@@ -202,9 +353,10 @@ class _ParentDashboardState extends State<ParentDashboard> {
             final IconData avatarIcon = isDeviation ? Icons.warning_rounded : (isStarted ? Icons.directions_car_rounded : Icons.check_circle_rounded);
             final Color cardHighlight = read ? Colors.transparent : (isDeviation ? AppTheme.warning.withOpacity(0.08) : (isStarted ? AppTheme.success.withOpacity(0.08) : AppTheme.primary.withOpacity(0.08)));
 
-            return Card(
+            return _premiumCard(
               margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
-              color: cardHighlight,
+              baseColor: cardHighlight == Colors.transparent ? Colors.white : cardHighlight,
+              padding: EdgeInsets.symmetric(horizontal: AppTheme.horizontalPadding(context), vertical: 8),
               child: ListTile(
                 contentPadding: EdgeInsets.symmetric(horizontal: AppTheme.horizontalPadding(context), vertical: 8),
                 leading: CircleAvatar(
@@ -257,10 +409,8 @@ class _ParentDashboardState extends State<ParentDashboard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Card(
-              child: Padding(
-                padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
-                child: Column(
+            _premiumCard(
+              child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(data['name'] ?? 'Parent', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
@@ -269,16 +419,14 @@ class _ParentDashboardState extends State<ParentDashboard> {
                     Text('Phone: ${data['phone'] ?? '—'}', style: const TextStyle(color: AppTheme.textSecondary, fontSize: 14)),
                   ],
                 ),
-              ),
             ),
             SizedBox(height: AppTheme.verticalSpacing(context) * 2),
             Text('Your children', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
             SizedBox(height: AppTheme.verticalSpacing(context)),
             if (children.isEmpty)
-              Card(
-                child: Padding(
-                  padding: EdgeInsets.all(AppTheme.horizontalPadding(context) * 1.5),
-                  child: Column(
+              _premiumCard(
+                padding: EdgeInsets.all(AppTheme.horizontalPadding(context) * 1.5),
+                child: Column(
                     children: [
                       Icon(Icons.child_care_rounded, size: 48, color: AppTheme.textSecondary.withOpacity(0.5)),
                       const SizedBox(height: 12),
@@ -287,17 +435,14 @@ class _ParentDashboardState extends State<ParentDashboard> {
                       Text('Go to Children to add your first child.', style: Theme.of(context).textTheme.bodySmall?.copyWith(color: AppTheme.textSecondary)),
                     ],
                   ),
-                ),
               )
             else
               ...children.asMap().entries.map((e) {
                 final i = e.key + 1;
                 final child = e.value;
-                return Card(
+                return _premiumCard(
                   margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
-                  child: Padding(
-                    padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
-                    child: Column(
+                  child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Row(
@@ -334,7 +479,6 @@ class _ParentDashboardState extends State<ParentDashboard> {
                         ),
                       ],
                     ),
-                  ),
                 );
               }),
             SizedBox(height: MediaQuery.paddingOf(context).bottom + 24),
@@ -348,14 +492,28 @@ class _ParentDashboardState extends State<ParentDashboard> {
     final parentChildren = List<Map<String, dynamic>>.from(data['children'] ?? []);
 
     Future<void> saveChild() async {
-      if (_childSchool == null ||
-          _childRoute == null ||
-          _childNameController.text.isEmpty ||
-          _childAgeController.text.isEmpty ||
-          _childRouteDetailsController.text.isEmpty ||
-          _childSchoolOnController.text.isEmpty ||
-          _childSchoolOffController.text.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Please fill all fields'), behavior: SnackBarBehavior.floating));
+      final validationError = _validateChildForm();
+      if (validationError != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(validationError),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+        return;
+      }
+      final currentPosition = await _getCurrentParentPosition();
+      if (currentPosition == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'Location permission is required to save child location.',
+              ),
+              behavior: SnackBarBehavior.floating,
+            ),
+          );
+        }
         return;
       }
       setState(() => _isUploading = true);
@@ -390,6 +548,8 @@ class _ParentDashboardState extends State<ParentDashboard> {
           'photo': photoUrl,
           'assignedDriver': assignedDriver,
           'assignedDriverName': assignedDriverName,
+          'parentLatitude': currentPosition.latitude,
+          'parentLongitude': currentPosition.longitude,
         };
       } else {
         childId = _firestore.collection('children').doc().id;
@@ -405,6 +565,8 @@ class _ParentDashboardState extends State<ParentDashboard> {
           'photo': photoUrl,
           'assignedDriver': null,
           'assignedDriverName': null,
+          'parentLatitude': currentPosition.latitude,
+          'parentLongitude': currentPosition.longitude,
         });
       }
 
@@ -490,9 +652,35 @@ class _ParentDashboardState extends State<ParentDashboard> {
             SizedBox(height: AppTheme.verticalSpacing(context)),
             TextField(controller: _childRouteDetailsController, decoration: const InputDecoration(labelText: 'Route details'), textInputAction: TextInputAction.next),
             SizedBox(height: AppTheme.verticalSpacing(context)),
-            TextField(controller: _childSchoolOnController, decoration: const InputDecoration(labelText: 'School on time'), textInputAction: TextInputAction.next),
+            TextField(
+              controller: _childSchoolOnController,
+              readOnly: true,
+              onTap: () => _pickTimeForController(_childSchoolOnController),
+              decoration: InputDecoration(
+                labelText: 'School on time',
+                hintText: 'Select time',
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.access_time_rounded),
+                  onPressed: () => _pickTimeForController(_childSchoolOnController),
+                ),
+              ),
+              textInputAction: TextInputAction.next,
+            ),
             SizedBox(height: AppTheme.verticalSpacing(context)),
-            TextField(controller: _childSchoolOffController, decoration: const InputDecoration(labelText: 'School off time'), textInputAction: TextInputAction.done),
+            TextField(
+              controller: _childSchoolOffController,
+              readOnly: true,
+              onTap: () => _pickTimeForController(_childSchoolOffController),
+              decoration: InputDecoration(
+                labelText: 'School off time',
+                hintText: 'Select time',
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.access_time_rounded),
+                  onPressed: () => _pickTimeForController(_childSchoolOffController),
+                ),
+              ),
+              textInputAction: TextInputAction.done,
+            ),
             SizedBox(height: AppTheme.verticalSpacing(context) * 2),
             if (_isUploading)
               const Center(child: CircularProgressIndicator())
@@ -509,8 +697,9 @@ class _ParentDashboardState extends State<ParentDashboard> {
               final i = entry.key;
               final child = entry.value;
               final photo = child['photo']?.toString() ?? '';
-              return Card(
+              return _premiumCard(
                 margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
+                padding: EdgeInsets.zero,
                 child: ListTile(
                   contentPadding: EdgeInsets.symmetric(horizontal: AppTheme.horizontalPadding(context), vertical: 8),
                   leading: photo.isNotEmpty
@@ -628,11 +817,9 @@ class _ParentDashboardState extends State<ParentDashboard> {
 
                       _updateAssignedDriver(driverId, driverData['name']?.toString() ?? '', childId);
 
-                      return Card(
+                      return _premiumCard(
                         margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context) * 2),
-                        child: Padding(
-                          padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
-                          child: Column(
+                        child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               if ((child['photo'] ?? '').toString().isNotEmpty)
@@ -666,7 +853,6 @@ class _ParentDashboardState extends State<ParentDashboard> {
                               ),
                             ],
                           ),
-                        ),
                       );
                     },
                   );
@@ -676,29 +862,50 @@ class _ParentDashboardState extends State<ParentDashboard> {
                   stream: _firestore.collection('users').where('role', isEqualTo: 'driver').snapshots(),
                   builder: (context, driversSnap) {
                     if (!driversSnap.hasData) return const Center(child: CircularProgressIndicator());
-                    final drivers = driversSnap.data!.docs.where((doc) {
-                      final d = doc.data();
-                      return d['school'] == childSchool && d['route'] == childRoute;
-                    }).toList();
+                    return StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+                      stream: _firestore
+                          .collection('requests')
+                          .where('status', isEqualTo: 'approved')
+                          .snapshots(),
+                      builder: (context, approvedRequestsSnap) {
+                        if (!approvedRequestsSnap.hasData) {
+                          return const Center(child: CircularProgressIndicator());
+                        }
 
-                    if (drivers.isEmpty) {
-                      return Card(
-                        margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context) * 2),
-                        child: Padding(
-                          padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
-                          child: Text('No drivers available for this route yet.', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary)),
-                        ),
-                      );
-                    }
+                        final approvedRequests = approvedRequestsSnap.data!.docs;
+                        final Map<String, int> occupiedSeatsByDriver = {};
+                        for (final req in approvedRequests) {
+                          final reqData = req.data();
+                          final driverId = (reqData['driverId'] ?? '').toString();
+                          if (driverId.isEmpty) continue;
+                          final childIds = (reqData['childIds'] as List?) ?? const [];
+                          occupiedSeatsByDriver[driverId] =
+                              (occupiedSeatsByDriver[driverId] ?? 0) + childIds.length;
+                        }
 
-                    return Column(
-                      children: drivers.map((doc) {
+                        final drivers = driversSnap.data!.docs.where((doc) {
+                          final d = doc.data();
+                          if (d['school'] != childSchool || d['route'] != childRoute) {
+                            return false;
+                          }
+                          final seats = int.tryParse((d['seats'] ?? '').toString()) ?? 0;
+                          final occupied = occupiedSeatsByDriver[doc.id] ?? 0;
+                          return seats <= 0 || occupied < seats;
+                        }).toList();
+
+                        if (drivers.isEmpty) {
+                          return _premiumCard(
+                            margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context) * 2),
+                            child: Text('No drivers available for this route yet.', style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary)),
+                          );
+                        }
+
+                        return Column(
+                          children: drivers.map((doc) {
                         final d = doc.data();
-                        return Card(
+                        return _premiumCard(
                           margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
-                          child: Padding(
-                            padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
-                            child: Column(
+                          child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 if ((d['profilePic'] ?? '').toString().isNotEmpty)
@@ -764,9 +971,10 @@ class _ParentDashboardState extends State<ParentDashboard> {
                                 ),
                               ],
                             ),
-                          ),
                         );
-                      }).toList(),
+                          }).toList(),
+                        );
+                      },
                     );
                   },
                 );
@@ -835,6 +1043,7 @@ class _ParentDashboardState extends State<ParentDashboard> {
         ];
 
         return Scaffold(
+          backgroundColor: AppTheme.surface,
           body: SafeArea(child: pages[_selectedIndex]),
           appBar: AppBar(title: Text(_navItems[_selectedIndex].label)),
           drawer: Drawer(
@@ -844,7 +1053,13 @@ class _ParentDashboardState extends State<ParentDashboard> {
                   Container(
                     width: double.infinity,
                     padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
-                    color: AppTheme.primary,
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [AppTheme.primary, AppTheme.primaryDark],
+                      ),
+                    ),
                     child: Column(
                       children: [
                         const SizedBox(height: 16),
@@ -867,9 +1082,9 @@ class _ParentDashboardState extends State<ParentDashboard> {
                       children: [
                         ..._navItems.asMap().entries.map((e) {
                           final selected = _selectedIndex == e.key;
-                          return ListTile(
-                            leading: Icon(e.value.icon, color: selected ? AppTheme.primary : AppTheme.textSecondary, size: 24),
-                            title: Text(e.value.label, style: TextStyle(fontWeight: selected ? FontWeight.w600 : FontWeight.normal, color: selected ? AppTheme.primary : AppTheme.textPrimary)),
+                          return _drawerNavTile(
+                            icon: e.value.icon,
+                            label: e.value.label,
                             selected: selected,
                             onTap: () {
                               setState(() => _selectedIndex = e.key);
@@ -877,10 +1092,11 @@ class _ParentDashboardState extends State<ParentDashboard> {
                             },
                           );
                         }),
-                        const Divider(),
-                        ListTile(
-                          leading: const Icon(Icons.logout_rounded, color: AppTheme.error),
-                          title: const Text('Logout', style: TextStyle(fontWeight: FontWeight.w500, color: AppTheme.error)),
+                        const Divider(height: 24),
+                        _drawerNavTile(
+                          icon: Icons.logout_rounded,
+                          label: 'Logout',
+                          selected: false,
                           onTap: () async {
                             await FirebaseAuth.instance.signOut();
                             if (context.mounted) {

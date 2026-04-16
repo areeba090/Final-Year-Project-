@@ -5,10 +5,12 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import 'gps_controller.dart';
 import 'driver_location_screen.dart';
+import 'driver_parent_location_screen.dart';
 import 'login_screen.dart';
 
 class DriverDashboard extends StatefulWidget {
@@ -41,6 +43,71 @@ class _DriverDashboardState extends State<DriverDashboard> {
   final Map<String, String> _childToParent = {};
   bool _savingProfile = false;
   String? _rideActionChildId;
+  static const double _rideActionAllowedMeters = 100.0;
+
+  Widget _premiumCard({
+    required Widget child,
+    EdgeInsetsGeometry? margin,
+    EdgeInsetsGeometry? padding,
+  }) {
+    return Container(
+      margin: margin,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Colors.white, AppTheme.subtleSurface.withOpacity(0.55)],
+        ),
+        border: Border.all(color: Colors.white.withOpacity(0.9)),
+        boxShadow: [
+          BoxShadow(
+            color: AppTheme.primary.withOpacity(0.08),
+            blurRadius: 20,
+            offset: const Offset(0, 8),
+          ),
+        ],
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(20),
+        child: Padding(
+          padding: padding ?? EdgeInsets.all(AppTheme.horizontalPadding(context)),
+          child: child,
+        ),
+      ),
+    );
+  }
+
+  Widget _drawerNavTile({
+    required IconData icon,
+    required String label,
+    required bool selected,
+    required VoidCallback onTap,
+  }) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 220),
+      margin: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+      decoration: BoxDecoration(
+        color: selected ? AppTheme.primary.withOpacity(0.12) : Colors.transparent,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: ListTile(
+        leading: Icon(
+          icon,
+          color: selected ? AppTheme.primary : AppTheme.textSecondary,
+          size: 22,
+        ),
+        title: Text(
+          label,
+          style: TextStyle(
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+            color: selected ? AppTheme.primary : AppTheme.textPrimary,
+          ),
+        ),
+        onTap: onTap,
+      ),
+    );
+  }
 
   @override
   void dispose() {
@@ -100,11 +167,10 @@ class _DriverDashboardState extends State<DriverDashboard> {
                 ? _loadingLicense
                 : _loadingVehicle;
     final isNarrow = AppTheme.isNarrow(context);
-    return Card(
+    return _premiumCard(
       margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
-      child: Padding(
-        padding: EdgeInsets.all(isNarrow ? 12 : 16),
-        child: Row(
+      padding: EdgeInsets.all(isNarrow ? 12 : 16),
+      child: Row(
           children: [
             CircleAvatar(
               radius: isNarrow ? 24 : 28,
@@ -144,7 +210,6 @@ class _DriverDashboardState extends State<DriverDashboard> {
             ],
           ],
         ),
-      ),
     );
   }
 
@@ -165,6 +230,33 @@ class _DriverDashboardState extends State<DriverDashboard> {
         builder: (_) => Scaffold(
           appBar: AppBar(title: Text(label)),
           body: SafeArea(child: Center(child: Image(image: img))),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openParentLocationForChild(Map<String, dynamic> child) async {
+    final lat = (child['parentLatitude'] as num?)?.toDouble();
+    final lng = (child['parentLongitude'] as num?)?.toDouble();
+    if (lat == null || lng == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Parent location is not available for this child.'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+      return;
+    }
+    if (!mounted) return;
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => DriverParentLocationScreen(
+          childName: (child['name'] ?? 'Child').toString(),
+          parentLatitude: lat,
+          parentLongitude: lng,
         ),
       ),
     );
@@ -200,6 +292,19 @@ class _DriverDashboardState extends State<DriverDashboard> {
         setState(() => _savingProfile = false);
       }
     }
+  }
+
+  Future<Position?> _resolveCurrentPosition() async {
+    var permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied ||
+        permission == LocationPermission.deniedForever) {
+      permission = await Geolocator.requestPermission();
+      if (permission == LocationPermission.denied ||
+          permission == LocationPermission.deniedForever) {
+        return null;
+      }
+    }
+    return Geolocator.getCurrentPosition(desiredAccuracy: LocationAccuracy.high);
   }
 
   Widget _profile(Map<String, dynamic> d) {
@@ -301,10 +406,8 @@ class _DriverDashboardState extends State<DriverDashboard> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Card(
-              child: Padding(
-                padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
-                child: Row(
+            _premiumCard(
+              child: Row(
                   children: [
                     CircleAvatar(
                       radius: 32,
@@ -339,7 +442,6 @@ class _DriverDashboardState extends State<DriverDashboard> {
                     ),
                   ],
                 ),
-              ),
             ),
             SizedBox(height: AppTheme.verticalSpacing(context)),
             _infoTile(Icons.badge_outlined, 'CNIC', d['cnic'] ?? '—'),
@@ -356,12 +458,13 @@ class _DriverDashboardState extends State<DriverDashboard> {
   }
 
   Widget _infoTile(IconData icon, String label, String value) {
-    return Card(
+    return _premiumCard(
       margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
+      padding: EdgeInsets.zero,
       child: ListTile(
-        leading: CircleAvatar(radius: 22, backgroundColor: AppTheme.primary.withOpacity(0.12), child: Icon(icon, color: AppTheme.primary, size: 22)),
-        title: Text(label, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
-        subtitle: Text(value, style: const TextStyle(fontWeight: FontWeight.w500, color: AppTheme.textPrimary)),
+          leading: CircleAvatar(radius: 22, backgroundColor: AppTheme.primary.withOpacity(0.12), child: Icon(icon, color: AppTheme.primary, size: 22)),
+          title: Text(label, style: const TextStyle(fontSize: 12, color: AppTheme.textSecondary)),
+          subtitle: Text(value, style: const TextStyle(fontWeight: FontWeight.w500, color: AppTheme.textPrimary)),
       ),
     );
   }
@@ -440,11 +543,9 @@ class _DriverDashboardState extends State<DriverDashboard> {
                       final childId = child['id'] as String? ?? '';
                       final isChildOnRide = _childrenOnRide.contains(childId);
                       final isActionLoading = _rideActionChildId == childId;
-                      return Card(
+                      return _premiumCard(
                         margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
-                        child: Padding(
-                          padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
-                          child: Column(
+                        child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Row(
@@ -493,6 +594,21 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                         icon: const Icon(Icons.phone_outlined, size: 18),
                                         label: Text(narrow ? 'Call' : 'Call parent'),
                                       ),
+                                      if (isChildOnRide)
+                                        OutlinedButton.icon(
+                                          onPressed: () => _openParentLocationForChild(
+                                            child,
+                                          ),
+                                          icon: const Icon(
+                                            Icons.location_on_outlined,
+                                            size: 18,
+                                          ),
+                                          label: Text(
+                                            narrow
+                                                ? 'Location'
+                                                : 'Parent location',
+                                          ),
+                                        ),
                                       FilledButton.icon(
                                         onPressed: isActionLoading
                                             ? null
@@ -500,6 +616,88 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                                 setState(() => _rideActionChildId = childId);
                                                 try {
                                                   final newRideOn = !isChildOnRide;
+                                                  final routeName =
+                                                      (driverData['route'] ?? '').toString();
+                                                  if (routeName.isEmpty) {
+                                                    if (mounted) {
+                                                      ScaffoldMessenger.of(context).showSnackBar(
+                                                        const SnackBar(
+                                                          content: Text(
+                                                            'Route is not set. Please update your route before starting/stopping ride.',
+                                                          ),
+                                                          behavior: SnackBarBehavior.floating,
+                                                        ),
+                                                      );
+                                                    }
+                                                    return;
+                                                  }
+
+                                                  final bounds =
+                                                      await getRouteBoundsByRouteName(
+                                                    _firestore,
+                                                    routeName,
+                                                  );
+                                                  if (bounds == null) {
+                                                    if (mounted) {
+                                                      ScaffoldMessenger.of(context).showSnackBar(
+                                                        const SnackBar(
+                                                          content: Text(
+                                                            'Unable to verify route location for this ride.',
+                                                          ),
+                                                          behavior: SnackBarBehavior.floating,
+                                                        ),
+                                                      );
+                                                    }
+                                                    return;
+                                                  }
+
+                                                  final currentPosition =
+                                                      await _resolveCurrentPosition();
+                                                  if (currentPosition == null) {
+                                                    if (mounted) {
+                                                      ScaffoldMessenger.of(context).showSnackBar(
+                                                        const SnackBar(
+                                                          content: Text(
+                                                            'Location permission is required to start/stop ride.',
+                                                          ),
+                                                          behavior: SnackBarBehavior.floating,
+                                                        ),
+                                                      );
+                                                    }
+                                                    return;
+                                                  }
+
+                                                  final targetLat = newRideOn
+                                                      ? bounds.startLat
+                                                      : bounds.endLat;
+                                                  final targetLng = newRideOn
+                                                      ? bounds.startLng
+                                                      : bounds.endLng;
+                                                  final distanceMeters =
+                                                      Geolocator.distanceBetween(
+                                                    currentPosition.latitude,
+                                                    currentPosition.longitude,
+                                                    targetLat,
+                                                    targetLng,
+                                                  );
+                                                  if (distanceMeters >
+                                                      _rideActionAllowedMeters) {
+                                                    final actionText = newRideOn
+                                                        ? 'start'
+                                                        : 'stop';
+                                                    if (mounted) {
+                                                      ScaffoldMessenger.of(context).showSnackBar(
+                                                        SnackBar(
+                                                          content: Text(
+                                                            'You can only $actionText ride within 100m of the expected location.',
+                                                          ),
+                                                          behavior: SnackBarBehavior.floating,
+                                                        ),
+                                                      );
+                                                    }
+                                                    return;
+                                                  }
+
                                                   final childName = child['name'] ?? 'your child';
                                                   await _sendRideNotificationToParent(type: newRideOn ? 'ride_started' : 'ride_ended', parentId: parentId, childName: childName);
                                                   setState(() {
@@ -511,23 +709,42 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                                   });
                                                   if (_childrenOnRide.isNotEmpty) {
                                                     final parentIds = _childrenOnRide.map((c) => _childToParent[c]).whereType<String>().toSet().toList();
-                                                    final routeName = (driverData['route'] ?? '').toString();
-                                                    final bounds = routeName.isNotEmpty
-                                                        ? await getRouteBoundsByRouteName(_firestore, routeName)
-                                                        : null;
                                                     final driverBounds = bounds != null
                                                         ? DriverRouteBounds(startLat: bounds.startLat, startLng: bounds.startLng, endLat: bounds.endLat, endLng: bounds.endLng)
                                                         : null;
                                                     if (GPSController.isTracking) {
                                                       GPSController.updateRideParents(parentIds);
                                                     } else {
-                                                      GPSController.startTracking(_user.uid, routeBounds: driverBounds, parentIds: parentIds);
+                                                      await GPSController.startTracking(_user.uid, routeBounds: driverBounds, parentIds: parentIds);
+                                                      // Give GPS a moment to start
+                                                      await Future.delayed(const Duration(milliseconds: 500));
+                                                      if (!GPSController.isTracking) {
+                                                        if (mounted) {
+                                                          ScaffoldMessenger.of(context).showSnackBar(
+                                                            SnackBar(
+                                                              content: const Text('GPS permission required. Please enable location services in settings.'),
+                                                              backgroundColor: AppTheme.error,
+                                                              behavior: SnackBarBehavior.floating,
+                                                            ),
+                                                          );
+                                                        }
+                                                      }
                                                     }
                                                   } else {
                                                     GPSController.stopTracking();
                                                     await GPSController.clearRideStatus(_user.uid);
                                                   }
                                                   await _firestore.collection('users').doc(_user.uid).set({'rideStatus': _childrenOnRide.isNotEmpty ? 'on' : 'off'}, SetOptions(merge: true));
+                                                } catch (e) {
+                                                  if (mounted) {
+                                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                      SnackBar(
+                                                        content: Text('Error: $e'),
+                                                        backgroundColor: AppTheme.error,
+                                                        behavior: SnackBarBehavior.floating,
+                                                      ),
+                                                    );
+                                                  }
                                                 } finally {
                                                   if (mounted) {
                                                     setState(() => _rideActionChildId = null);
@@ -554,7 +771,6 @@ class _DriverDashboardState extends State<DriverDashboard> {
                               ),
                             ],
                           ),
-                        ),
                       );
                     }).toList(),
                   );
@@ -679,6 +895,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
         ];
 
         return Scaffold(
+          backgroundColor: AppTheme.surface,
           body: SafeArea(
             child: pages[_index],
           ),
@@ -692,7 +909,13 @@ class _DriverDashboardState extends State<DriverDashboard> {
                   Container(
                     width: double.infinity,
                     padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
-                    color: AppTheme.primary,
+                    decoration: const BoxDecoration(
+                      gradient: LinearGradient(
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                        colors: [AppTheme.primary, AppTheme.primaryDark],
+                      ),
+                    ),
                     child: Column(
                       children: [
                         const SizedBox(height: 16),
@@ -716,9 +939,9 @@ class _DriverDashboardState extends State<DriverDashboard> {
                       children: [
                         ..._navItems.asMap().entries.map((e) {
                           final selected = _index == e.key;
-                          return ListTile(
-                            leading: Icon(e.value.icon, color: selected ? AppTheme.primary : AppTheme.textSecondary, size: 24),
-                            title: Text(e.value.label, style: TextStyle(fontWeight: selected ? FontWeight.w600 : FontWeight.normal, color: selected ? AppTheme.primary : AppTheme.textPrimary)),
+                          return _drawerNavTile(
+                            icon: e.value.icon,
+                            label: e.value.label,
                             selected: selected,
                             onTap: () {
                               setState(() => _index = e.key);
@@ -726,10 +949,11 @@ class _DriverDashboardState extends State<DriverDashboard> {
                             },
                           );
                         }),
-                        const Divider(),
-                        ListTile(
-                          leading: const Icon(Icons.logout_rounded, color: AppTheme.error),
-                          title: const Text('Logout', style: TextStyle(fontWeight: FontWeight.w500, color: AppTheme.error)),
+                        const Divider(height: 24),
+                        _drawerNavTile(
+                          icon: Icons.logout_rounded,
+                          label: 'Logout',
+                          selected: false,
                           onTap: () async {
                             await FirebaseAuth.instance.signOut();
                             if (context.mounted) {

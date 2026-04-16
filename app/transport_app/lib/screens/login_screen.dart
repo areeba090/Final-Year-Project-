@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import '../theme/app_theme.dart';
 
 import 'signup_screen.dart';
 import 'driver_dashboard.dart';
@@ -22,6 +23,15 @@ class _LoginScreenState extends State<LoginScreen> {
 
   // ✅ added for eye toggle
   bool _hidePassword = true;
+  bool _animateIn = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) setState(() => _animateIn = true);
+    });
+  }
 
   Future<void> _login() async {
     final email = _emailController.text.trim();
@@ -127,88 +137,84 @@ class _LoginScreenState extends State<LoginScreen> {
       body: Container(
         width: double.infinity,
         height: double.infinity,
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [
-              Theme.of(context).colorScheme.primary.withOpacity(0.8),
-              Theme.of(context).colorScheme.primary.withOpacity(0.1),
-            ],
-          ),
-        ),
+        decoration: BoxDecoration(gradient: AppTheme.pageGradient),
         child: SafeArea(
           child: SingleChildScrollView(
             child: ConstrainedBox(
-              constraints: BoxConstraints(minHeight: screenSize.height - padding.top - padding.bottom),
+              constraints:
+                  BoxConstraints(minHeight: screenSize.height - padding.top - padding.bottom),
               child: Padding(
-                padding: EdgeInsets.symmetric(
-                  horizontal: isMobile ? 20 : 48,
-                  vertical: 24,
-                ),
+                padding: EdgeInsets.symmetric(horizontal: isMobile ? 20 : 48, vertical: 24),
                 child: Center(
                   child: ConstrainedBox(
-                    constraints: BoxConstraints(maxWidth: 400),
+                    constraints: const BoxConstraints(maxWidth: 400),
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        SizedBox(height: 24),
-                        Container(
-                          padding: const EdgeInsets.all(16),
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.primary,
-                            borderRadius: BorderRadius.circular(20),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
-                                blurRadius: 20,
-                                offset: const Offset(0, 8),
+                        const SizedBox(height: 24),
+                        AnimatedScale(
+                          scale: _animateIn ? 1 : 0.92,
+                          duration: const Duration(milliseconds: 600),
+                          curve: Curves.easeOutBack,
+                          child: Container(
+                            padding: const EdgeInsets.all(18),
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                colors: [
+                                  Theme.of(context).colorScheme.primary,
+                                  AppTheme.primaryDark,
+                                ],
                               ),
-                            ],
-                          ),
-                          child: Icon(
-                            Icons.directions_car,
-                            size: 48,
-                            color: Theme.of(context).colorScheme.onPrimary,
+                              borderRadius: BorderRadius.circular(22),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Theme.of(context).colorScheme.primary.withOpacity(0.3),
+                                  blurRadius: 22,
+                                  offset: const Offset(0, 10),
+                                ),
+                              ],
+                            ),
+                            child: Icon(
+                              Icons.directions_car,
+                              size: 48,
+                              color: Theme.of(context).colorScheme.onPrimary,
+                            ),
                           ),
                         ),
                         const SizedBox(height: 28),
                         Text(
                           "Welcome Back",
                           style: Theme.of(context).textTheme.headlineLarge?.copyWith(
-                            fontWeight: FontWeight.bold,
-                            color: Theme.of(context).colorScheme.onBackground,
-                          ),
+                                fontWeight: FontWeight.bold,
+                                color: Theme.of(context).colorScheme.onBackground,
+                              ),
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 8),
                         Text(
                           "Sign in to your account to continue",
                           style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.onBackground.withOpacity(0.6),
-                          ),
+                                color: Theme.of(context).colorScheme.onBackground.withOpacity(0.6),
+                              ),
                           textAlign: TextAlign.center,
                         ),
                         const SizedBox(height: 24),
-                        Container(
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.surface,
-                            borderRadius: BorderRadius.circular(20),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.08),
-                                blurRadius: 24,
-                                offset: const Offset(0, 12),
-                              ),
-                            ],
-                          ),
-                          padding: EdgeInsets.all(isMobile ? 20 : 28),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
+                        AnimatedSlide(
+                          offset: _animateIn ? Offset.zero : const Offset(0, 0.08),
+                          duration: const Duration(milliseconds: 500),
+                          curve: Curves.easeOutCubic,
+                          child: AnimatedOpacity(
+                            opacity: _animateIn ? 1 : 0,
+                            duration: const Duration(milliseconds: 450),
+                            child: Container(
+                              width: double.infinity,
+                              decoration: AppTheme.glassCardDecoration,
+                              padding: EdgeInsets.all(isMobile ? 20 : 28),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.stretch,
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
                             Text(
                               "Email Address",
                               style: Theme.of(context).textTheme.labelLarge?.copyWith(
@@ -302,8 +308,7 @@ class _LoginScreenState extends State<LoginScreen> {
                                 minimumSize: const Size(double.infinity, 56),
                                 backgroundColor: Theme.of(context).colorScheme.primary,
                                 foregroundColor: Theme.of(context).colorScheme.onPrimary,
-                                elevation: 8,
-                                shadowColor: Theme.of(context).colorScheme.primary.withOpacity(0.4),
+                                elevation: 2,
                                 shape: RoundedRectangleBorder(
                                   borderRadius: BorderRadius.circular(14),
                                 ),
@@ -328,8 +333,10 @@ class _LoginScreenState extends State<LoginScreen> {
                                       ),
                                     ),
                             ),
-                          ],
-                        ),
+                                ],
+                              ),
+                            ),
+                          ),
                         ),
                         const SizedBox(height: 28),
                         Wrap(
@@ -346,7 +353,21 @@ class _LoginScreenState extends State<LoginScreen> {
                               onPressed: () {
                                 Navigator.push(
                                   context,
-                                  MaterialPageRoute(builder: (_) => const SignupScreen()),
+                                  PageRouteBuilder(
+                                    pageBuilder: (_, __, ___) => const SignupScreen(),
+                                    transitionsBuilder: (_, animation, __, child) {
+                                      return FadeTransition(
+                                        opacity: animation,
+                                        child: SlideTransition(
+                                          position: Tween<Offset>(
+                                            begin: const Offset(0.08, 0),
+                                            end: Offset.zero,
+                                          ).animate(CurvedAnimation(parent: animation, curve: Curves.easeOut)),
+                                          child: child,
+                                        ),
+                                      );
+                                    },
+                                  ),
                                 );
                               },
                               style: TextButton.styleFrom(
