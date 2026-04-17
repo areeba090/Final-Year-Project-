@@ -65,8 +65,16 @@ const AdminDashboard = () => {
   useEffect(() => {
     if (!selectedDriver) {
       setSelectedDriverLocation(null);
+      // Modal map container unmounts on close, so force a clean map instance
+      // to avoid binding the next driver's map to a stale DOM node.
+      mapInstanceRef.current = null;
+      markerRef.current = null;
       return;
     }
+
+    // Switching driver while modal is open should also recreate map + marker.
+    mapInstanceRef.current = null;
+    markerRef.current = null;
 
     const locRef = doc(db, "driverLocations", selectedDriver.id);
     const unsub = onSnapshot(locRef, (snap) => {

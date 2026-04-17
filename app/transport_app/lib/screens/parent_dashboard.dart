@@ -6,6 +6,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
 import '../theme/app_theme.dart';
 import '../services/web_notifications.dart';
@@ -148,6 +149,9 @@ class _ParentDashboardState extends State<ParentDashboard> {
   String? _childSchool;
   String? _childRoute;
   int? _editingChildIndex;
+  LatLng? _selectedParentLocation;
+  GoogleMapController? _childLocationMapController;
+  LatLng? _pendingChildMapCameraTarget;
   static final RegExp _nameRegex = RegExp(r"^[A-Za-z ]{2,40}$");
   static final RegExp _timeRegex =
       RegExp(r"^(0?[1-9]|1[0-2]):[0-5][0-9]\s?(AM|PM|am|pm)$");
@@ -213,6 +217,9 @@ class _ParentDashboardState extends State<ParentDashboard> {
     if (offMinutes - onMinutes < 180) {
       return 'School off time must be at least 3 hours after school on time.';
     }
+    if (_selectedParentLocation == null) {
+      return 'Please select parent location on the map.';
+    }
     return null;
   }
 
@@ -229,6 +236,160 @@ class _ParentDashboardState extends State<ParentDashboard> {
     return Geolocator.getCurrentPosition(
       desiredAccuracy: LocationAccuracy.high,
     );
+  }
+
+  Future<void> _focusChildLocationOnMap(LatLng target, {double zoom = 15}) async {
+    final controller = _childLocationMapController;
+    if (controller == null) {
+      _pendingChildMapCameraTarget = target;
+      return;
+    }
+    try {
+      await controller.animateCamera(CameraUpdate.newLatLngZoom(target, zoom));
+    } catch (_) {
+      // Fallback for platforms where animateCamera can be flaky right after rebuild.
+      await controller.moveCamera(CameraUpdate.newLatLngZoom(target, zoom));
+    }
+  }
+
+  Future<void> _openParentLocationPickerModal() async {
+    var tempSelectedLocation =
+        _selectedParentLocation ?? const LatLng(24.8607, 67.0011);
+    var loadingCurrent = false;
+    _pendingChildMapCameraTarget = tempSelectedLocation;
+
+    final picked = await showModalBottomSheet<LatLng>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (modalContext) {
+        return StatefulBuilder(
+          builder: (context, setModalState) {
+            Future<void> useCurrentInModal() async {
+              setModalState(() => loadingCurrent = true);
+              try {
+                final position = await _getCurrentParentPosition();
+                if (position == null) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Unable to fetch current location.'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                  return;
+                }
+                final point = LatLng(position.latitude, position.longitude);
+                setModalState(() => tempSelectedLocation = point);
+                await _focusChildLocationOnMap(point, zoom: 16);
+              } finally {
+                if (mounted) {
+                  setModalState(() => loadingCurrent = false);
+                }
+              }
+            }
+
+            return SizedBox(
+              height: MediaQuery.of(modalContext).size.height * 0.8,
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Select parent location',
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.of(modalContext).pop(),
+                          child: const Text('Cancel'),
+                        ),
+                        FilledButton(
+                          onPressed: () =>
+                              Navigator.of(modalContext).pop(tempSelectedLocation),
+                          child: const Text('Done'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: GoogleMap(
+                      initialCameraPosition: CameraPosition(
+                        target: tempSelectedLocation,
+                        zoom: 15,
+                      ),
+                      onMapCreated: (controller) {
+                        _childLocationMapController = controller;
+                        final target =
+                            _pendingChildMapCameraTarget ?? tempSelectedLocation;
+                        _pendingChildMapCameraTarget = null;
+                        _focusChildLocationOnMap(target, zoom: 16);
+                      },
+                      onTap: (position) {
+                        setModalState(() => tempSelectedLocation = position);
+                      },
+                      markers: {
+                        Marker(
+                          markerId: const MarkerId('selected_parent_location'),
+                          position: tempSelectedLocation,
+                          infoWindow: const InfoWindow(
+                            title: 'Selected parent location',
+                          ),
+                        ),
+                      },
+                      myLocationButtonEnabled: false,
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Lat: ${tempSelectedLocation.latitude.toStringAsFixed(6)}, Lng: ${tempSelectedLocation.longitude.toStringAsFixed(6)}',
+                            style: const TextStyle(
+                              fontSize: 12,
+                              color: AppTheme.textSecondary,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        OutlinedButton.icon(
+                          onPressed: loadingCurrent ? null : useCurrentInModal,
+                          icon: loadingCurrent
+                              ? const SizedBox(
+                                  height: 14,
+                                  width: 14,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.my_location_rounded, size: 16),
+                          label: const Text('Use current'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+
+    _childLocationMapController = null;
+    _pendingChildMapCameraTarget = null;
+
+    if (picked != null && mounted) {
+      setState(() {
+        _selectedParentLocation = picked;
+      });
+    }
   }
 
   Future<void> _pickChildImage() async {
@@ -502,20 +663,6 @@ class _ParentDashboardState extends State<ParentDashboard> {
         );
         return;
       }
-      final currentPosition = await _getCurrentParentPosition();
-      if (currentPosition == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Location permission is required to save child location.',
-              ),
-              behavior: SnackBarBehavior.floating,
-            ),
-          );
-        }
-        return;
-      }
       setState(() => _isUploading = true);
 
       String photoUrl = '';
@@ -548,8 +695,8 @@ class _ParentDashboardState extends State<ParentDashboard> {
           'photo': photoUrl,
           'assignedDriver': assignedDriver,
           'assignedDriverName': assignedDriverName,
-          'parentLatitude': currentPosition.latitude,
-          'parentLongitude': currentPosition.longitude,
+          'parentLatitude': _selectedParentLocation!.latitude,
+          'parentLongitude': _selectedParentLocation!.longitude,
         };
       } else {
         childId = _firestore.collection('children').doc().id;
@@ -565,8 +712,8 @@ class _ParentDashboardState extends State<ParentDashboard> {
           'photo': photoUrl,
           'assignedDriver': null,
           'assignedDriverName': null,
-          'parentLatitude': currentPosition.latitude,
-          'parentLongitude': currentPosition.longitude,
+          'parentLatitude': _selectedParentLocation!.latitude,
+          'parentLongitude': _selectedParentLocation!.longitude,
         });
       }
 
@@ -583,6 +730,7 @@ class _ParentDashboardState extends State<ParentDashboard> {
         _childRouteDetailsController.clear();
         _childSchoolOnController.clear();
         _childSchoolOffController.clear();
+        _selectedParentLocation = null;
         _isUploading = false;
       });
       if (mounted) {
@@ -681,6 +829,50 @@ class _ParentDashboardState extends State<ParentDashboard> {
               ),
               textInputAction: TextInputAction.done,
             ),
+            SizedBox(height: AppTheme.verticalSpacing(context)),
+            Text(
+              'Parent location',
+              style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: AppTheme.textPrimary,
+                  ),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton.icon(
+              onPressed: _openParentLocationPickerModal,
+              icon: const Icon(Icons.map_outlined, size: 18),
+              label: Text(
+                _selectedParentLocation == null
+                    ? 'Open map picker'
+                    : 'Update location on map',
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              _selectedParentLocation == null
+                  ? 'No location selected yet.'
+                  : 'Lat: ${_selectedParentLocation!.latitude.toStringAsFixed(6)}, Lng: ${_selectedParentLocation!.longitude.toStringAsFixed(6)}',
+              style: const TextStyle(
+                fontSize: 12,
+                color: AppTheme.textSecondary,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    _selectedParentLocation == null
+                        ? 'Tap "Open map picker" to choose parent location.'
+                        : 'Selected location will be saved to Firebase.',
+                    style: const TextStyle(
+                      fontSize: 12,
+                      color: AppTheme.textSecondary,
+                    ),
+                  ),
+                ),
+              ],
+            ),
             SizedBox(height: AppTheme.verticalSpacing(context) * 2),
             if (_isUploading)
               const Center(child: CircularProgressIndicator())
@@ -723,6 +915,10 @@ class _ParentDashboardState extends State<ParentDashboard> {
                             _childSchool = child['school']?.toString();
                             _childRoute = child['route']?.toString();
                             _childImageBytes = null;
+                            final lat = (child['parentLatitude'] as num?)?.toDouble();
+                            final lng = (child['parentLongitude'] as num?)?.toDouble();
+                            _selectedParentLocation =
+                                (lat != null && lng != null) ? LatLng(lat, lng) : null;
                           });
                         },
                       ),
