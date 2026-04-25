@@ -6,11 +6,13 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../theme/app_theme.dart';
 import 'gps_controller.dart';
 import 'driver_location_screen.dart';
 import 'driver_parent_location_screen.dart';
+import 'driver_ride_map_screen.dart';
 import 'login_screen.dart';
 
 class DriverDashboard extends StatefulWidget {
@@ -44,6 +46,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
   bool _savingProfile = false;
   String? _rideActionChildId;
   static const double _rideActionAllowedMeters = 100.0;
+  final Map<String, _RideMode> _selectedRideModeByChild = {};
 
   Widget _premiumCard({
     required Widget child,
@@ -474,7 +477,9 @@ class _DriverDashboardState extends State<DriverDashboard> {
     try {
       final driverSnap = await _firestore.collection('users').doc(_user.uid).get();
       final driverName = driverSnap.data()?['name'] ?? 'Driver';
-      final message = type == 'ride_started' ? 'Ride started for $childName.' : 'Ride finished for $childName.';
+      final message = type == 'ride_started'
+          ? 'Child Picked Up: $childName.'
+          : 'Child Dropped Off: $childName.';
       await _firestore.collection('notifications').add({
         'parentId': parentId,
         'type': type,
@@ -488,6 +493,31 @@ class _DriverDashboardState extends State<DriverDashboard> {
     } catch (e) {
       debugPrint('Error sending ride notification: $e');
     }
+  }
+
+  _RideMode _getRideModeForChild(String childId) {
+    return _selectedRideModeByChild[childId] ?? _RideMode.morning;
+  }
+
+  ({double pickupLat, double pickupLng, double destinationLat, double destinationLng})
+      _getRideEndpoints({
+    required RouteBounds bounds,
+    required _RideMode rideMode,
+  }) {
+    if (rideMode == _RideMode.morning) {
+      return (
+        pickupLat: bounds.endLat,
+        pickupLng: bounds.endLng,
+        destinationLat: bounds.startLat,
+        destinationLng: bounds.startLng,
+      );
+    }
+    return (
+      pickupLat: bounds.startLat,
+      pickupLng: bounds.startLng,
+      destinationLat: bounds.endLat,
+      destinationLng: bounds.endLng,
+    );
   }
 
   Widget _assignedChildren(Map<String, dynamic> driverData) {
@@ -543,6 +573,9 @@ class _DriverDashboardState extends State<DriverDashboard> {
                       final childId = child['id'] as String? ?? '';
                       final isChildOnRide = _childrenOnRide.contains(childId);
                       final isActionLoading = _rideActionChildId == childId;
+                      final selectedRideMode = _getRideModeForChild(childId);
+                      final pickupLabel = selectedRideMode == _RideMode.morning ? 'Home' : 'School';
+                      final destinationLabel = selectedRideMode == _RideMode.morning ? 'School' : 'Home';
                       return _premiumCard(
                         margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
                         child: Column(
@@ -586,6 +619,73 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                     spacing: 8,
                                     runSpacing: 8,
                                     children: [
+                                      SegmentedButton<_RideMode>(
+                                        segments: const [
+                                          ButtonSegment<_RideMode>(
+                                            value: _RideMode.morning,
+                                            label: Text('Morning Ride'),
+                                            icon: Icon(Icons.wb_sunny_outlined, size: 16),
+                                          ),
+                                          ButtonSegment<_RideMode>(
+                                            value: _RideMode.evening,
+                                            label: Text('Evening Ride'),
+                                            icon: Icon(Icons.nightlight_round, size: 16),
+                                          ),
+                                        ],
+                                        selected: {selectedRideMode},
+                                        onSelectionChanged: isChildOnRide
+                                            ? null
+                                            : (selection) {
+                                                setState(() {
+                                                  _selectedRideModeByChild[childId] = selection.first;
+                                                });
+                                              },
+                                      ),
+                                      OutlinedButton.icon(
+                                        onPressed: isActionLoading
+                                            ? null
+                                            : () async {
+                                                final routeName = (driverData['route'] ?? '').toString();
+                                                if (routeName.isEmpty) {
+                                                  if (mounted) {
+                                                    ScaffoldMessenger.of(context).showSnackBar(
+                                                      const SnackBar(
+                                                        content: Text('Route is not set for this driver.'),
+                                                        behavior: SnackBarBehavior.floating,
+                                                      ),
+                                                    );
+                                                  }
+                                                  return;
+                                                }
+                                                final bounds = await getRouteBoundsByRouteName(
+                                                  _firestore,
+                                                  routeName,
+                                                );
+                                                if (bounds == null || !mounted) return;
+                                                final endpoints = _getRideEndpoints(
+                                                  bounds: bounds,
+                                                  rideMode: selectedRideMode,
+                                                );
+                                                await Navigator.push(
+                                                  context,
+                                                  MaterialPageRoute(
+                                                    builder: (_) => DriverRideMapScreen(
+                                                      childName: (child['name'] ?? 'Child').toString(),
+                                                      rideModeLabel: selectedRideMode == _RideMode.morning
+                                                          ? 'Morning Ride'
+                                                          : 'Evening Ride',
+                                                      pickupLabel: pickupLabel,
+                                                      destinationLabel: destinationLabel,
+                                                      pickupLocation: LatLng(endpoints.pickupLat, endpoints.pickupLng),
+                                                      destinationLocation: LatLng(endpoints.destinationLat, endpoints.destinationLng),
+                                                      liveTrackingMode: isChildOnRide,
+                                                    ),
+                                                  ),
+                                                );
+                                              },
+                                        icon: const Icon(Icons.map_outlined, size: 18),
+                                        label: Text(narrow ? 'Map' : 'Show map'),
+                                      ),
                                       OutlinedButton.icon(
                                         onPressed: () async {
                                           final telUri = Uri(scheme: 'tel', path: parentData['phone'] ?? '');
@@ -667,12 +767,16 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                                     return;
                                                   }
 
+                                                  final endpoints = _getRideEndpoints(
+                                                    bounds: bounds,
+                                                    rideMode: selectedRideMode,
+                                                  );
                                                   final targetLat = newRideOn
-                                                      ? bounds.startLat
-                                                      : bounds.endLat;
+                                                      ? endpoints.pickupLat
+                                                      : endpoints.destinationLat;
                                                   final targetLng = newRideOn
-                                                      ? bounds.startLng
-                                                      : bounds.endLng;
+                                                      ? endpoints.pickupLng
+                                                      : endpoints.destinationLng;
                                                   final distanceMeters =
                                                       Geolocator.distanceBetween(
                                                     currentPosition.latitude,
@@ -709,9 +813,16 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                                   });
                                                   if (_childrenOnRide.isNotEmpty) {
                                                     final parentIds = _childrenOnRide.map((c) => _childToParent[c]).whereType<String>().toSet().toList();
-                                                    final driverBounds = bounds != null
-                                                        ? DriverRouteBounds(startLat: bounds.startLat, startLng: bounds.startLng, endLat: bounds.endLat, endLng: bounds.endLng)
-                                                        : null;
+                                                    final endpoints = _getRideEndpoints(
+                                                      bounds: bounds,
+                                                      rideMode: selectedRideMode,
+                                                    );
+                                                    final driverBounds = DriverRouteBounds(
+                                                      startLat: endpoints.pickupLat,
+                                                      startLng: endpoints.pickupLng,
+                                                      endLat: endpoints.destinationLat,
+                                                      endLng: endpoints.destinationLng,
+                                                    );
                                                     if (GPSController.isTracking) {
                                                       GPSController.updateRideParents(parentIds);
                                                     } else {
@@ -979,3 +1090,5 @@ class _NavItem {
   final IconData icon;
   const _NavItem(this.label, this.icon);
 }
+
+enum _RideMode { morning, evening }

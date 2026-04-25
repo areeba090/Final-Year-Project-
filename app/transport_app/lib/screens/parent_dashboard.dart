@@ -128,7 +128,9 @@ class _ParentDashboardState extends State<ParentDashboard> {
         final childName = data['childName'] as String?;
         final isDeviation = type == 'route_deviation';
         final isStarted = type == 'ride_started';
-        final String title = isDeviation ? 'Route deviation' : (isStarted ? 'Ride started' : 'Ride finished');
+        final String title = isDeviation
+            ? 'Route deviation'
+            : (isStarted ? 'Child Picked Up' : 'Child Dropped Off');
         final String body = isDeviation ? message : (childName != null && childName.isNotEmpty ? message : message);
         if (kIsWeb) {
           showRideNotification(title, body);
@@ -350,16 +352,7 @@ class _ParentDashboardState extends State<ParentDashboard> {
                     padding: const EdgeInsets.fromLTRB(16, 10, 16, 16),
                     child: Row(
                       children: [
-                        Expanded(
-                          child: Text(
-                            'Lat: ${tempSelectedLocation.latitude.toStringAsFixed(6)}, Lng: ${tempSelectedLocation.longitude.toStringAsFixed(6)}',
-                            style: const TextStyle(
-                              fontSize: 12,
-                              color: AppTheme.textSecondary,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
+                        const Spacer(),
                         OutlinedButton.icon(
                           onPressed: loadingCurrent ? null : useCurrentInModal,
                           icon: loadingCurrent
@@ -484,7 +477,7 @@ class _ParentDashboardState extends State<ParentDashboard> {
                   Text('No notifications yet', style: Theme.of(context).textTheme.titleMedium?.copyWith(color: AppTheme.textPrimary)),
                   const SizedBox(height: 8),
                   Text(
-                    'You\'ll see "Ride started" and "Ride finished" here when the driver starts or ends the ride for your child.',
+                    'You\'ll see "Child Picked Up" and "Child Dropped Off" alerts here when the driver starts or ends your child\'s ride.',
                     textAlign: TextAlign.center,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(color: AppTheme.textSecondary),
                   ),
@@ -509,7 +502,9 @@ class _ParentDashboardState extends State<ParentDashboard> {
             final read = d['read'] as bool? ?? false;
             final isStarted = type == 'ride_started';
             final isDeviation = type == 'route_deviation';
-            final String titleText = isDeviation ? 'Route deviation' : (isStarted ? 'Ride started' : 'Ride finished');
+            final String titleText = isDeviation
+                ? 'Route deviation'
+                : (isStarted ? 'Child Picked Up' : 'Child Dropped Off');
             final Color avatarColor = isDeviation ? AppTheme.warning : (isStarted ? AppTheme.success : AppTheme.primary);
             final IconData avatarIcon = isDeviation ? Icons.warning_rounded : (isStarted ? Icons.directions_car_rounded : Icons.check_circle_rounded);
             final Color cardHighlight = read ? Colors.transparent : (isDeviation ? AppTheme.warning.withOpacity(0.08) : (isStarted ? AppTheme.success.withOpacity(0.08) : AppTheme.primary.withOpacity(0.08)));
@@ -848,31 +843,7 @@ class _ParentDashboardState extends State<ParentDashboard> {
               ),
             ),
             const SizedBox(height: 6),
-            Text(
-              _selectedParentLocation == null
-                  ? 'No location selected yet.'
-                  : 'Lat: ${_selectedParentLocation!.latitude.toStringAsFixed(6)}, Lng: ${_selectedParentLocation!.longitude.toStringAsFixed(6)}',
-              style: const TextStyle(
-                fontSize: 12,
-                color: AppTheme.textSecondary,
-              ),
-            ),
             const SizedBox(height: 8),
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    _selectedParentLocation == null
-                        ? 'Tap "Open map picker" to choose parent location.'
-                        : 'Selected location will be saved to Firebase.',
-                    style: const TextStyle(
-                      fontSize: 12,
-                      color: AppTheme.textSecondary,
-                    ),
-                  ),
-                ),
-              ],
-            ),
             SizedBox(height: AppTheme.verticalSpacing(context) * 2),
             if (_isUploading)
               const Center(child: CircularProgressIndicator())
