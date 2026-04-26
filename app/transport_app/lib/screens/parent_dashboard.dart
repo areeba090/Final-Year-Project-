@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:typed_data';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -6,11 +7,14 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 import '../services/web_notifications.dart';
 import '../services/local_notifications.dart';
+import '../config/maps_config.dart';
 import 'login_screen.dart';
 import 'driver_location_screen.dart';
 
@@ -148,6 +152,7 @@ class _ParentDashboardState extends State<ParentDashboard> {
   final TextEditingController _childRouteDetailsController = TextEditingController();
   final TextEditingController _childSchoolOnController = TextEditingController();
   final TextEditingController _childSchoolOffController = TextEditingController();
+  final TextEditingController _locationSearchController = TextEditingController();
   String? _childSchool;
   String? _childRoute;
   int? _editingChildIndex;
@@ -171,6 +176,18 @@ class _ParentDashboardState extends State<ParentDashboard> {
     int hour24 = hourRaw % 12;
     if (period == 'PM') hour24 += 12;
     return hour24 * 60 + minute;
+  }
+
+  @override
+  void dispose() {
+    _notifSub?.cancel();
+    _childNameController.dispose();
+    _childAgeController.dispose();
+    _childRouteDetailsController.dispose();
+    _childSchoolOnController.dispose();
+    _childSchoolOffController.dispose();
+    _locationSearchController.dispose();
+    super.dispose();
   }
 
   Future<void> _pickTimeForController(TextEditingController controller) async {
@@ -254,11 +271,256 @@ class _ParentDashboardState extends State<ParentDashboard> {
     }
   }
 
+  Future<LatLng?> _resolveAddressToLatLng(String query) async {
+    final cleaned = query.trim();
+    if (cleaned.isEmpty) return null;
+    final key = googleMapsApiKey;
+    if (key.isNotEmpty) {
+      final geocodeUrl = Uri.parse(
+        'https://maps.googleapis.com/maps/api/geocode/json'
+        '?address=${Uri.encodeQueryComponent(cleaned)}'
+        '&key=$key',
+      );
+      try {
+        final response =
+            await http.get(geocodeUrl).timeout(const Duration(seconds: 8));
+        if (response.statusCode == 200) {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          if ((data['status'] as String?) == 'OK') {
+            final results = data['results'] as List<dynamic>? ?? const [];
+            if (results.isNotEmpty) {
+              final first = results.first as Map<String, dynamic>;
+              final geometry = first['geometry'] as Map<String, dynamic>?;
+              final location = geometry?['location'] as Map<String, dynamic>?;
+              final lat = (location?['lat'] as num?)?.toDouble();
+              final lng = (location?['lng'] as num?)?.toDouble();
+              if (lat != null && lng != null) {
+                return LatLng(lat, lng);
+              }
+            }
+          }
+        }
+      } catch (_) {
+        // Fallback to geocoding package below.
+      }
+    }
+    try {
+      final result = await locationFromAddress(cleaned);
+      if (result.isEmpty) return null;
+      return LatLng(result.first.latitude, result.first.longitude);
+    } catch (_) {
+      // Final fallback: OpenStreetMap Nominatim (no API key required).
+      final nominatimUrl = Uri.parse(
+        'https://nominatim.openstreetmap.org/search'
+        '?q=${Uri.encodeQueryComponent(cleaned)}'
+        '&format=json'
+        '&limit=1',
+      );
+      try {
+        final response = await http.get(
+          nominatimUrl,
+          headers: const {
+            'User-Agent': 'transport-app/1.0 (location-search)',
+            'Accept': 'application/json',
+          },
+        ).timeout(const Duration(seconds: 8));
+        if (response.statusCode != 200) return null;
+        final data = jsonDecode(response.body) as List<dynamic>;
+        if (data.isEmpty) return null;
+        final first = data.first as Map<String, dynamic>;
+        final lat = double.tryParse((first['lat'] ?? '').toString());
+        final lng = double.tryParse((first['lon'] ?? '').toString());
+        if (lat == null || lng == null) return null;
+        return LatLng(lat, lng);
+      } catch (_) {
+        return null;
+      }
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> _fetchLocationSuggestions(
+      String query) async {
+    final cleaned = query.trim();
+    final key = googleMapsApiKey;
+    if (cleaned.isEmpty) return const [];
+    if (key.isEmpty) {
+      // If Google key isn't available, still provide suggestions via Nominatim.
+      final nominatimUrl = Uri.parse(
+        'https://nominatim.openstreetmap.org/search'
+        '?q=${Uri.encodeQueryComponent(cleaned)}'
+        '&format=json'
+        '&addressdetails=1'
+        '&limit=8',
+      );
+      try {
+        final response = await http.get(
+          nominatimUrl,
+          headers: const {
+            'User-Agent': 'transport-app/1.0 (location-search)',
+            'Accept': 'application/json',
+          },
+        ).timeout(const Duration(seconds: 8));
+        if (response.statusCode != 200) return const [];
+        final data = jsonDecode(response.body) as List<dynamic>;
+        return data
+            .map((item) => item as Map<String, dynamic>)
+            .map((item) {
+              final lat = double.tryParse((item['lat'] ?? '').toString());
+              final lng = double.tryParse((item['lon'] ?? '').toString());
+              return <String, dynamic>{
+                'description': (item['display_name'] ?? '').toString(),
+                'placeId': (item['place_id'] ?? '').toString(),
+                'lat': lat,
+                'lng': lng,
+              };
+            })
+            .where((item) =>
+                (item['description'] as String).isNotEmpty &&
+                item['lat'] != null &&
+                item['lng'] != null)
+            .toList();
+      } catch (_) {
+        return const [];
+      }
+    }
+    final url = Uri.parse(
+      'https://maps.googleapis.com/maps/api/place/autocomplete/json'
+      '?input=${Uri.encodeQueryComponent(cleaned)}'
+      '&key=$key',
+    );
+    try {
+      final response = await http.get(url).timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) return const [];
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final status = data['status'] as String?;
+      if (status == 'OK') {
+        final predictions = data['predictions'] as List<dynamic>? ?? const [];
+        final placesResults = predictions
+            .map((item) => item as Map<String, dynamic>)
+            .map((item) => <String, dynamic>{
+                  'description': (item['description'] ?? '').toString(),
+                  'placeId': (item['place_id'] ?? '').toString(),
+                })
+            .where((item) =>
+                (item['description'] as String).isNotEmpty &&
+                (item['placeId'] as String).isNotEmpty)
+            .toList();
+        if (placesResults.isNotEmpty) return placesResults;
+      }
+
+      // Fallback: geocoding API suggestions so dropdown still appears
+      // even when Places Autocomplete is unavailable/restricted.
+      final geocodeUrl = Uri.parse(
+        'https://maps.googleapis.com/maps/api/geocode/json'
+        '?address=${Uri.encodeQueryComponent(cleaned)}'
+        '&key=$key',
+      );
+      final geoResponse = await http.get(geocodeUrl).timeout(
+            const Duration(seconds: 8),
+          );
+      if (geoResponse.statusCode != 200) return const [];
+      final geoData = jsonDecode(geoResponse.body) as Map<String, dynamic>;
+      final geoStatus = geoData['status'] as String?;
+      if (geoStatus != 'OK') return const [];
+      final results = geoData['results'] as List<dynamic>? ?? const [];
+      return results
+          .map((item) => item as Map<String, dynamic>)
+          .map((item) {
+            final geometry = item['geometry'] as Map<String, dynamic>?;
+            final location = geometry?['location'] as Map<String, dynamic>?;
+            final lat = (location?['lat'] as num?)?.toDouble();
+            final lng = (location?['lng'] as num?)?.toDouble();
+            return <String, dynamic>{
+              'description': (item['formatted_address'] ?? '').toString(),
+              'placeId': (item['place_id'] ?? '').toString(),
+              'lat': lat,
+              'lng': lng,
+            };
+          })
+          .where((item) =>
+              (item['description'] as String).isNotEmpty &&
+              item['lat'] != null &&
+              item['lng'] != null)
+          .take(8)
+          .toList();
+    } catch (_) {
+      // Fallback to Nominatim if Google requests fail/restricted.
+      final nominatimUrl = Uri.parse(
+        'https://nominatim.openstreetmap.org/search'
+        '?q=${Uri.encodeQueryComponent(cleaned)}'
+        '&format=json'
+        '&addressdetails=1'
+        '&limit=8',
+      );
+      try {
+        final response = await http.get(
+          nominatimUrl,
+          headers: const {
+            'User-Agent': 'transport-app/1.0 (location-search)',
+            'Accept': 'application/json',
+          },
+        ).timeout(const Duration(seconds: 8));
+        if (response.statusCode != 200) return const [];
+        final data = jsonDecode(response.body) as List<dynamic>;
+        return data
+            .map((item) => item as Map<String, dynamic>)
+            .map((item) {
+              final lat = double.tryParse((item['lat'] ?? '').toString());
+              final lng = double.tryParse((item['lon'] ?? '').toString());
+              return <String, dynamic>{
+                'description': (item['display_name'] ?? '').toString(),
+                'placeId': (item['place_id'] ?? '').toString(),
+                'lat': lat,
+                'lng': lng,
+              };
+            })
+            .where((item) =>
+                (item['description'] as String).isNotEmpty &&
+                item['lat'] != null &&
+                item['lng'] != null)
+            .toList();
+      } catch (_) {
+        return const [];
+      }
+    }
+  }
+
+  Future<LatLng?> _resolvePlaceIdToLatLng(String placeId) async {
+    final key = googleMapsApiKey;
+    if (placeId.trim().isEmpty || key.isEmpty) return null;
+    final url = Uri.parse(
+      'https://maps.googleapis.com/maps/api/place/details/json'
+      '?place_id=${Uri.encodeQueryComponent(placeId)}'
+      '&fields=geometry'
+      '&key=$key',
+    );
+    try {
+      final response = await http.get(url).timeout(const Duration(seconds: 8));
+      if (response.statusCode != 200) return null;
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if ((data['status'] as String?) != 'OK') return null;
+      final result = data['result'] as Map<String, dynamic>?;
+      final geometry = result?['geometry'] as Map<String, dynamic>?;
+      final location = geometry?['location'] as Map<String, dynamic>?;
+      final lat = (location?['lat'] as num?)?.toDouble();
+      final lng = (location?['lng'] as num?)?.toDouble();
+      if (lat == null || lng == null) return null;
+      return LatLng(lat, lng);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _openParentLocationPickerModal() async {
     var tempSelectedLocation =
         _selectedParentLocation ?? const LatLng(24.8607, 67.0011);
     var loadingCurrent = false;
+    var searchingLocation = false;
+    var loadingSuggestions = false;
+    List<Map<String, dynamic>> suggestions = [];
+    Timer? searchDebounce;
     _pendingChildMapCameraTarget = tempSelectedLocation;
+    _locationSearchController.clear();
 
     final picked = await showModalBottomSheet<LatLng>(
       context: context,
@@ -287,6 +549,113 @@ class _ParentDashboardState extends State<ParentDashboard> {
               } finally {
                 if (mounted) {
                   setModalState(() => loadingCurrent = false);
+                }
+              }
+            }
+
+            Future<void> searchAddressInModal() async {
+              final query = _locationSearchController.text.trim();
+              if (query.isEmpty) {
+                if (!mounted) return;
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Enter an address or place name to search.'),
+                    behavior: SnackBarBehavior.floating,
+                  ),
+                );
+                return;
+              }
+              setModalState(() => searchingLocation = true);
+              try {
+                LatLng? point = await _resolveAddressToLatLng(query);
+                if (point == null) {
+                  final candidates = await _fetchLocationSuggestions(query);
+                  if (candidates.isNotEmpty) {
+                    final first = candidates.first;
+                    final lat = (first['lat'] as num?)?.toDouble();
+                    final lng = (first['lng'] as num?)?.toDouble();
+                    final placeId = (first['placeId'] ?? '').toString();
+                    point =
+                        (lat != null && lng != null) ? LatLng(lat, lng) : null;
+                    point ??= await _resolvePlaceIdToLatLng(placeId);
+                    point ??=
+                        await _resolveAddressToLatLng((first['description'] ?? '').toString());
+                  }
+                }
+                if (point == null) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Location not found. Try a more specific address.'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                  return;
+                }
+                final resolvedPoint = point;
+                setModalState(() => tempSelectedLocation = resolvedPoint);
+                await _focusChildLocationOnMap(resolvedPoint, zoom: 16);
+                if (mounted) {
+                  setModalState(() => suggestions = []);
+                }
+              } finally {
+                if (mounted) {
+                  setModalState(() => searchingLocation = false);
+                }
+              }
+            }
+
+            Future<void> updateSuggestions(String query) async {
+              final cleaned = query.trim();
+              if (cleaned.length < 2) {
+                if (mounted) {
+                  setModalState(() {
+                    loadingSuggestions = false;
+                    suggestions = [];
+                  });
+                }
+                return;
+              }
+              setModalState(() => loadingSuggestions = true);
+              final results = await _fetchLocationSuggestions(cleaned);
+              if (!mounted) return;
+              if (_locationSearchController.text.trim() != cleaned) return;
+              setModalState(() {
+                loadingSuggestions = false;
+                suggestions = results;
+              });
+            }
+
+            Future<void> selectSuggestion(Map<String, dynamic> item) async {
+              final description = (item['description'] ?? '').toString();
+              final placeId = (item['placeId'] ?? '').toString();
+              final lat = (item['lat'] as num?)?.toDouble();
+              final lng = (item['lng'] as num?)?.toDouble();
+              _locationSearchController.text = description;
+              setModalState(() {
+                searchingLocation = true;
+                suggestions = [];
+              });
+              try {
+                LatLng? point =
+                    (lat != null && lng != null) ? LatLng(lat, lng) : null;
+                point ??= await _resolvePlaceIdToLatLng(placeId);
+                point ??= await _resolveAddressToLatLng(description);
+                if (point == null) {
+                  if (!mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Unable to open selected location.'),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                  return;
+                }
+                setModalState(() => tempSelectedLocation = point!);
+                await _focusChildLocationOnMap(point, zoom: 16);
+              } finally {
+                if (mounted) {
+                  setModalState(() => searchingLocation = false);
                 }
               }
             }
@@ -320,6 +689,76 @@ class _ParentDashboardState extends State<ParentDashboard> {
                       ],
                     ),
                   ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: _locationSearchController,
+                            textInputAction: TextInputAction.search,
+                            onSubmitted: (_) => searchAddressInModal(),
+                            onChanged: (value) {
+                              searchDebounce?.cancel();
+                              searchDebounce = Timer(
+                                const Duration(milliseconds: 350),
+                                () => updateSuggestions(value),
+                              );
+                            },
+                            decoration: const InputDecoration(
+                              labelText: 'Search location',
+                              hintText: 'e.g. Mirpur Abbottabad',
+                              prefixIcon: Icon(Icons.search_rounded),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        FilledButton(
+                          onPressed: searchingLocation ? null : searchAddressInModal,
+                          child: searchingLocation
+                              ? const SizedBox(
+                                  height: 16,
+                                  width: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Text('Search'),
+                        ),
+                      ],
+                    ),
+                  ),
+                  if (loadingSuggestions)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                      child: LinearProgressIndicator(minHeight: 2),
+                    ),
+                  if (suggestions.isNotEmpty)
+                    Container(
+                      margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                      constraints: const BoxConstraints(maxHeight: 180),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.black12),
+                      ),
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: suggestions.length,
+                        separatorBuilder: (_, __) => const Divider(height: 1),
+                        itemBuilder: (context, index) {
+                          final item = suggestions[index];
+                          return ListTile(
+                            dense: true,
+                            leading: const Icon(Icons.place_rounded, size: 18),
+                            title: Text(
+                              item['description'] ?? '',
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            onTap: () => selectSuggestion(item),
+                          );
+                        },
+                      ),
+                    ),
                   Expanded(
                     child: GoogleMap(
                       initialCameraPosition: CameraPosition(
@@ -375,8 +814,10 @@ class _ParentDashboardState extends State<ParentDashboard> {
       },
     );
 
+    searchDebounce?.cancel();
     _childLocationMapController = null;
     _pendingChildMapCameraTarget = null;
+    _locationSearchController.clear();
 
     if (picked != null && mounted) {
       setState(() {

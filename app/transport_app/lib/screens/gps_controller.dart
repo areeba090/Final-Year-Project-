@@ -122,7 +122,7 @@ class GPSController {
           endLat: bounds.endLat,
           endLng: bounds.endLng,
         );
-        if (distanceMeters >= deviationThresholdMeters && !_deviationNotified) {
+        if (distanceMeters > deviationThresholdMeters && !_deviationNotified) {
           _deviationNotified = true;
           for (final parentId in _parentIds) {
             try {

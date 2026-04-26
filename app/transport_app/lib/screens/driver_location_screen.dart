@@ -228,7 +228,7 @@ class _TrackingContentState extends State<_TrackingContent> {
   void _checkDeviation(double lat, double lng) {
     final distanceMeters = _distanceToRoute(lat, lng);
 
-    if (distanceMeters >= deviationThresholdMeters && !widget.deviationNotified) {
+    if (distanceMeters > deviationThresholdMeters && !widget.deviationNotified) {
       _sendDeviationNotification();
       widget.onDeviationNotified();
     } else if (distanceMeters < backOnRouteThresholdMeters && widget.deviationNotified) {

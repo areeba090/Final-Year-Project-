@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import '../theme/app_theme.dart';
+import '../services/directions_service.dart';
 
 class DriverParentLocationScreen extends StatefulWidget {
   final String childName;
@@ -25,6 +26,7 @@ class _DriverParentLocationScreenState extends State<DriverParentLocationScreen>
   GoogleMapController? _mapController;
   LatLng? _driverPosition;
   Timer? _refreshTimer;
+  List<LatLng>? _routePoints;
 
   LatLng get _parentPosition =>
       LatLng(widget.parentLatitude, widget.parentLongitude);
@@ -63,30 +65,49 @@ class _DriverParentLocationScreenState extends State<DriverParentLocationScreen>
     setState(() {
       _driverPosition = LatLng(pos.latitude, pos.longitude);
     });
+    _loadRoadRoute();
+    _fitBounds();
+  }
+
+  Future<void> _loadRoadRoute() async {
+    final driverPosition = _driverPosition;
+    if (driverPosition == null) return;
+    final points = await getRoadRoutePoints(
+      originLat: driverPosition.latitude,
+      originLng: driverPosition.longitude,
+      destLat: _parentPosition.latitude,
+      destLng: _parentPosition.longitude,
+    );
+    if (!mounted) return;
+    setState(() {
+      _routePoints = points;
+    });
     _fitBounds();
   }
 
   void _fitBounds() {
     if (_mapController == null || _driverPosition == null) return;
-    final sw = LatLng(
-      _driverPosition!.latitude < _parentPosition.latitude
-          ? _driverPosition!.latitude
-          : _parentPosition.latitude,
-      _driverPosition!.longitude < _parentPosition.longitude
-          ? _driverPosition!.longitude
-          : _parentPosition.longitude,
-    );
-    final ne = LatLng(
-      _driverPosition!.latitude > _parentPosition.latitude
-          ? _driverPosition!.latitude
-          : _parentPosition.latitude,
-      _driverPosition!.longitude > _parentPosition.longitude
-          ? _driverPosition!.longitude
-          : _parentPosition.longitude,
-    );
+    final points = <LatLng>[
+      _driverPosition!,
+      _parentPosition,
+      ...?_routePoints,
+    ];
+    double minLat = points.first.latitude;
+    double maxLat = points.first.latitude;
+    double minLng = points.first.longitude;
+    double maxLng = points.first.longitude;
+    for (final point in points.skip(1)) {
+      if (point.latitude < minLat) minLat = point.latitude;
+      if (point.latitude > maxLat) maxLat = point.latitude;
+      if (point.longitude < minLng) minLng = point.longitude;
+      if (point.longitude > maxLng) maxLng = point.longitude;
+    }
     _mapController!.animateCamera(
       CameraUpdate.newLatLngBounds(
-        LatLngBounds(southwest: sw, northeast: ne),
+        LatLngBounds(
+          southwest: LatLng(minLat, minLng),
+          northeast: LatLng(maxLat, maxLng),
+        ),
         80,
       ),
     );
@@ -114,7 +135,9 @@ class _DriverParentLocationScreenState extends State<DriverParentLocationScreen>
       if (_driverPosition != null)
         Polyline(
           polylineId: const PolylineId('driver_to_parent'),
-          points: [_driverPosition!, _parentPosition],
+          points: (_routePoints != null && _routePoints!.length >= 2)
+              ? _routePoints!
+              : [_driverPosition!, _parentPosition],
           color: AppTheme.primary,
           width: 5,
         ),
