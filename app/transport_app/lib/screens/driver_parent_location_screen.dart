@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
@@ -9,12 +10,16 @@ class DriverParentLocationScreen extends StatefulWidget {
   final String childName;
   final double parentLatitude;
   final double parentLongitude;
+  final double schoolLatitude;
+  final double schoolLongitude;
 
   const DriverParentLocationScreen({
     super.key,
     required this.childName,
     required this.parentLatitude,
     required this.parentLongitude,
+    required this.schoolLatitude,
+    required this.schoolLongitude,
   });
 
   @override
@@ -26,47 +31,76 @@ class _DriverParentLocationScreenState extends State<DriverParentLocationScreen>
   GoogleMapController? _mapController;
   LatLng? _driverPosition;
   Timer? _refreshTimer;
+  StreamSubscription<Position>? _positionSub;
   List<LatLng>? _routePoints;
 
   LatLng get _parentPosition =>
       LatLng(widget.parentLatitude, widget.parentLongitude);
+  LatLng get _schoolPosition =>
+      LatLng(widget.schoolLatitude, widget.schoolLongitude);
 
   @override
   void initState() {
     super.initState();
-    _refreshDriverPosition();
-    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (_) {
-      _refreshDriverPosition();
+    _startDriverPositionUpdates();
+    // Refresh the road route periodically
+    _refreshTimer = Timer.periodic(const Duration(seconds: 15), (_) {
+      _loadRoadRoute();
     });
   }
 
   @override
   void dispose() {
     _refreshTimer?.cancel();
+    _positionSub?.cancel();
     _mapController?.dispose();
     super.dispose();
   }
 
-  Future<void> _refreshDriverPosition() async {
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
+  Future<void> _startDriverPositionUpdates() async {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) return;
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
-        return;
-      }
+      if (permission == LocationPermission.denied) return;
     }
 
-    final pos = await Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high,
-    );
-    if (!mounted) return;
-    setState(() {
-      _driverPosition = LatLng(pos.latitude, pos.longitude);
+    if (permission == LocationPermission.deniedForever) return;
+
+    // Get an initial position quickly
+    try {
+      final pos = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+      if (mounted) {
+        setState(() {
+          _driverPosition = LatLng(pos.latitude, pos.longitude);
+        });
+        _loadRoadRoute();
+        _fitBounds();
+      }
+    } catch (e) {
+      // Ignore initial fetch errors
+    }
+
+    // Subscribe to stream for continuous tracking
+    _positionSub = Geolocator.getPositionStream(
+      locationSettings: const LocationSettings(
+        accuracy: LocationAccuracy.high,
+        distanceFilter: 5,
+      ),
+    ).listen((Position position) {
+      if (!mounted) return;
+      setState(() {
+        _driverPosition = LatLng(position.latitude, position.longitude);
+      });
+      _fitBounds();
     });
-    _loadRoadRoute();
-    _fitBounds();
   }
 
   Future<void> _loadRoadRoute() async {
@@ -82,7 +116,7 @@ class _DriverParentLocationScreenState extends State<DriverParentLocationScreen>
     setState(() {
       _routePoints = points;
     });
-    _fitBounds();
+    // Optional: avoid re-fitting bounds constantly if user is interacting with map
   }
 
   void _fitBounds() {
@@ -90,6 +124,7 @@ class _DriverParentLocationScreenState extends State<DriverParentLocationScreen>
     final points = <LatLng>[
       _driverPosition!,
       _parentPosition,
+      _schoolPosition,
       ...?_routePoints,
     ];
     double minLat = points.first.latitude;
@@ -120,24 +155,28 @@ class _DriverParentLocationScreenState extends State<DriverParentLocationScreen>
         markerId: const MarkerId('parent'),
         position: _parentPosition,
         infoWindow: InfoWindow(title: '${widget.childName} parent'),
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+        icon: kIsWeb ? BitmapDescriptor.defaultMarker : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+      ),
+      Marker(
+        markerId: const MarkerId('school'),
+        position: _schoolPosition,
+        infoWindow: const InfoWindow(title: 'School'),
+        icon: kIsWeb ? BitmapDescriptor.defaultMarker : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
       ),
       if (_driverPosition != null)
         Marker(
           markerId: const MarkerId('driver'),
           position: _driverPosition!,
           infoWindow: const InfoWindow(title: 'Your live location'),
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          icon: kIsWeb ? BitmapDescriptor.defaultMarker : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
         ),
     };
 
     final polylines = <Polyline>{
-      if (_driverPosition != null)
+      if (_driverPosition != null && _routePoints != null && _routePoints!.isNotEmpty)
         Polyline(
           polylineId: const PolylineId('driver_to_parent'),
-          points: (_routePoints != null && _routePoints!.length >= 2)
-              ? _routePoints!
-              : [_driverPosition!, _parentPosition],
+          points: _routePoints!,
           color: AppTheme.primary,
           width: 5,
         ),
@@ -154,8 +193,8 @@ class _DriverParentLocationScreenState extends State<DriverParentLocationScreen>
               initialCameraPosition: CameraPosition(target: initialCenter, zoom: 14),
               markers: markers,
               polylines: polylines,
-              myLocationEnabled: true,
-              myLocationButtonEnabled: true,
+              myLocationEnabled: !kIsWeb,
+              myLocationButtonEnabled: !kIsWeb,
               onMapCreated: (controller) {
                 _mapController = controller;
                 _fitBounds();
@@ -180,7 +219,7 @@ class _DriverParentLocationScreenState extends State<DriverParentLocationScreen>
                 ],
               ),
               child: const Text(
-                'Driver location refreshes every 10 seconds.',
+                'Driver location updates in real-time.',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontWeight: FontWeight.w600,

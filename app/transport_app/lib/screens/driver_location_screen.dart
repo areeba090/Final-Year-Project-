@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import 'package:geolocator/geolocator.dart';
 import '../utils/route_utils.dart';
+import '../theme/app_theme.dart';
 import '../services/directions_service.dart';
 import '../services/local_notifications.dart';
 import '../services/web_notifications.dart';
@@ -46,8 +48,8 @@ Future<RouteBounds?> fetchRouteBoundsForChild(
   final routeData = routeQuery.docs.first.data();
   final startLat = (routeData['schoolLatitude'] ?? routeData['schoolLat']) as num?;
   final startLng = (routeData['schoolLongitude'] ?? routeData['schoolLng']) as num?;
-  final endLat = (routeData['destinationLatitude'] ?? routeData['destinationLat']) as num?;
-  final endLng = (routeData['destinationLongitude'] ?? routeData['destinationLng']) as num?;
+  final endLat = (child['parentLatitude'] ?? parentData['latitude']) as num?;
+  final endLng = (child['parentLongitude'] ?? parentData['longitude']) as num?;
   if (startLat == null || startLng == null || endLat == null || endLng == null) return null;
 
   return RouteBounds(
@@ -275,23 +277,28 @@ class _TrackingContentState extends State<_TrackingContent> {
         final lat = (locData['latitude'] ?? 0.0).toDouble();
         final lng = (locData['longitude'] ?? 0.0).toDouble();
         final hasValidPosition = lat != 0.0 && lng != 0.0;
-        final isDriverOnRide = (locData['status'] ?? '').toString() == 'onRide';
+        final driverStatus = (locData['status'] ?? '').toString();
+        final isDriverVisible = driverStatus != 'off' && driverStatus.isNotEmpty;
+        final isDriverOnRide = driverStatus == 'onRide';
 
-        // Only check deviation when ride has started; only show driver on map when on ride.
+        // Only check deviation when ride has started; only show driver on map when visible.
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (isDriverOnRide && hasValidPosition && _routeBounds != null) {
             _checkDeviation(lat, lng);
           }
+          if (hasValidPosition && isDriverVisible && _mapController != null) {
+            _autoFollowDriver(LatLng(lat, lng));
+          }
         });
 
-        // Show driver marker only when driver has started the ride.
-        final LatLng? driverPosition = (hasValidPosition && isDriverOnRide) ? LatLng(lat, lng) : null;
+        // Show driver marker as long as they are not 'off'.
+        final LatLng? driverPosition = (hasValidPosition && isDriverVisible) ? LatLng(lat, lng) : null;
         final Marker? driverMarker = driverPosition == null
             ? null
             : Marker(
                 markerId: const MarkerId('driver'),
                 position: driverPosition,
-                icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+                icon: kIsWeb ? BitmapDescriptor.defaultMarker : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
               );
 
         Set<Polyline> polylines = {};
@@ -300,18 +307,6 @@ class _TrackingContentState extends State<_TrackingContent> {
             Polyline(
               polylineId: const PolylineId('route'),
               points: _roadRoutePoints!,
-              color: Colors.blue,
-              width: 5,
-            ),
-          );
-        } else if (_routeBounds != null) {
-          polylines.add(
-            Polyline(
-              polylineId: const PolylineId('route'),
-              points: [
-                LatLng(_routeBounds!.startLat, _routeBounds!.startLng),
-                LatLng(_routeBounds!.endLat, _routeBounds!.endLng),
-              ],
               color: Colors.blue,
               width: 5,
             ),
@@ -325,16 +320,16 @@ class _TrackingContentState extends State<_TrackingContent> {
             Marker(
               markerId: const MarkerId('start'),
               position: LatLng(_routeBounds!.startLat, _routeBounds!.startLng),
-              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-              infoWindow: const InfoWindow(title: 'Start (School)'),
+              icon: kIsWeb ? BitmapDescriptor.defaultMarker : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+              infoWindow: const InfoWindow(title: 'School Location'),
             ),
           );
           markers.add(
             Marker(
               markerId: const MarkerId('end'),
               position: LatLng(_routeBounds!.endLat, _routeBounds!.endLng),
-              icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-              infoWindow: const InfoWindow(title: 'Destination'),
+              icon: kIsWeb ? BitmapDescriptor.defaultMarker : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+              infoWindow: const InfoWindow(title: 'Parent Location'),
             ),
           );
         }
@@ -391,8 +386,8 @@ class _TrackingContentState extends State<_TrackingContent> {
                   ),
                   markers: markers,
                   polylines: polylines,
-                  myLocationEnabled: true,
-                  myLocationButtonEnabled: true,
+                  myLocationEnabled: !kIsWeb,
+                  myLocationButtonEnabled: !kIsWeb,
                   onMapCreated: (controller) {
                     _mapController = controller;
                     if (driverPosition != null && (_roadRoutePoints != null || _routeBounds != null)) {
@@ -407,7 +402,7 @@ class _TrackingContentState extends State<_TrackingContent> {
                   },
                 ),
               ),
-              if (!isDriverOnRide)
+              if (!isDriverVisible || !hasValidPosition)
                 Positioned(
                   left: 0,
                   right: 0,
@@ -419,11 +414,30 @@ class _TrackingContentState extends State<_TrackingContent> {
                       child: Padding(
                         padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
                         child: Text(
-                          'Driver has not started the ride yet. Location will appear when the ride starts.',
+                          'Driver is currently offline. Tracking will begin once the driver is active.',
                           textAlign: TextAlign.center,
-                          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            color: Theme.of(context).colorScheme.onSurface,
-                          ),
+                          style: Theme.of(context).textTheme.bodyMedium,
+                        ),
+                      ),
+                    ),
+                  ),
+                )
+              else if (!isDriverOnRide)
+                Positioned(
+                  left: 0,
+                  right: 0,
+                  bottom: 24,
+                  child: Center(
+                    child: Material(
+                      elevation: 4,
+                      color: AppTheme.primary,
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                        child: const Text(
+                          'Driver is on the way to your location',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
                         ),
                       ),
                     ),
@@ -434,6 +448,28 @@ class _TrackingContentState extends State<_TrackingContent> {
         );
       },
     );
+  }
+
+  LatLng? _lastCameraPosition;
+
+  void _autoFollowDriver(LatLng currentPos) {
+    if (_lastCameraPosition == null) {
+      _lastCameraPosition = currentPos;
+      _fitBoundsIncludingDriver(currentPos);
+      return;
+    }
+
+    final dist = Geolocator.distanceBetween(
+      _lastCameraPosition!.latitude,
+      _lastCameraPosition!.longitude,
+      currentPos.latitude,
+      currentPos.longitude,
+    );
+
+    if (dist > 50) {
+      _lastCameraPosition = currentPos;
+      _fitBoundsIncludingDriver(currentPos);
+    }
   }
 
   void _fitBounds() {
@@ -471,6 +507,13 @@ class _TrackingContentState extends State<_TrackingContent> {
       minLng = b.startLng < b.endLng ? b.startLng : b.endLng;
       maxLng = b.startLng > b.endLng ? b.startLng : b.endLng;
     }
+    
+    // Add driver position to min/max check again just to be safe
+    if (driverPos.latitude < minLat) minLat = driverPos.latitude;
+    if (driverPos.latitude > maxLat) maxLat = driverPos.latitude;
+    if (driverPos.longitude < minLng) minLng = driverPos.longitude;
+    if (driverPos.longitude > maxLng) maxLng = driverPos.longitude;
+
     _mapController!.animateCamera(CameraUpdate.newLatLngBounds(
       LatLngBounds(southwest: LatLng(minLat, minLng), northeast: LatLng(maxLat, maxLng)),
       80,

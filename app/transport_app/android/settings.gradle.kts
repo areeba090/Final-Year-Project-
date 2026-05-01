@@ -18,7 +18,7 @@ pluginManagement {
 
 plugins {
     id("dev.flutter.flutter-plugin-loader") version "1.0.0"
-    id("com.android.application") version "8.3.0" apply false       // stable version (aligned with buildscript)
+    id("com.android.application") version "8.5.0" apply false       // stable version (aligned with buildscript)
     // START: FlutterFire Configuration
     id("com.google.gms.google-services") version "4.4.2" apply false // stable version
     // END: FlutterFire Configuration

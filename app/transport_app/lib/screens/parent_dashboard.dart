@@ -10,6 +10,7 @@ import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:http/http.dart' as http;
 import '../theme/app_theme.dart';
 import '../services/web_notifications.dart';
@@ -44,26 +45,31 @@ class _ParentDashboardState extends State<ParentDashboard> {
     return Container(
       margin: margin,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(24),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
           colors: [
             baseColor ?? Colors.white,
-            AppTheme.subtleSurface.withOpacity(0.55),
+            AppTheme.subtleSurface.withOpacity(0.4),
           ],
         ),
-        border: Border.all(color: Colors.white.withOpacity(0.9)),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.primary.withOpacity(0.08),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
+            color: AppTheme.primary.withOpacity(0.06),
+            blurRadius: 30,
+            offset: const Offset(0, 12),
+          ),
+          BoxShadow(
+            color: Colors.white,
+            blurRadius: 0,
+            offset: const Offset(-2, -2),
           ),
         ],
+        border: Border.all(color: Colors.white.withOpacity(0.8), width: 1.5),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(24),
         child: Padding(
           padding: padding ?? EdgeInsets.all(AppTheme.horizontalPadding(context)),
           child: child,
@@ -157,6 +163,7 @@ class _ParentDashboardState extends State<ParentDashboard> {
   String? _childRoute;
   int? _editingChildIndex;
   LatLng? _selectedParentLocation;
+  bool _loadingParentLocation = false;
   GoogleMapController? _childLocationMapController;
   LatLng? _pendingChildMapCameraTarget;
   static final RegExp _nameRegex = RegExp(r"^[A-Za-z ]{2,40}$");
@@ -205,7 +212,7 @@ class _ParentDashboardState extends State<ParentDashboard> {
     });
   }
 
-  String? _validateChildForm() {
+  String? _validateChildForm(List<Map<String, dynamic>> parentChildren) {
     final name = _childNameController.text.trim();
     final ageText = _childAgeController.text.trim();
     final routeDetails = _childRouteDetailsController.text.trim();
@@ -239,22 +246,46 @@ class _ParentDashboardState extends State<ParentDashboard> {
     if (_selectedParentLocation == null) {
       return 'Please select parent location on the map.';
     }
+    
+    // Photo mandatory check
+    final hasPhoto = _childImageBytes != null || 
+                     (_editingChildIndex != null && (parentChildren[_editingChildIndex!]['photo'] ?? '').toString().isNotEmpty);
+    if (!hasPhoto) {
+      return 'Please upload a child photo.';
+    }
+    
     return null;
   }
 
   Future<Position?> _getCurrentParentPosition() async {
-    var permission = await Geolocator.checkPermission();
-    if (permission == LocationPermission.denied ||
-        permission == LocationPermission.deniedForever) {
+    bool serviceEnabled;
+    LocationPermission permission;
+
+    // Test if location services are enabled.
+    serviceEnabled = await Geolocator.isLocationServiceEnabled();
+    if (!serviceEnabled) {
+      return null;
+    }
+
+    permission = await Geolocator.checkPermission();
+    if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
-      if (permission == LocationPermission.denied ||
-          permission == LocationPermission.deniedForever) {
+      if (permission == LocationPermission.denied) {
         return null;
       }
     }
-    return Geolocator.getCurrentPosition(
-      desiredAccuracy: LocationAccuracy.high,
-    );
+    
+    if (permission == LocationPermission.deniedForever) {
+      return null;
+    }
+
+    try {
+      return await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> _focusChildLocationOnMap(LatLng target, {double zoom = 15}) async {
@@ -519,7 +550,6 @@ class _ParentDashboardState extends State<ParentDashboard> {
     var loadingSuggestions = false;
     List<Map<String, dynamic>> suggestions = [];
     Timer? searchDebounce;
-    _pendingChildMapCameraTarget = tempSelectedLocation;
     _locationSearchController.clear();
 
     final picked = await showModalBottomSheet<LatLng>(
@@ -529,6 +559,28 @@ class _ParentDashboardState extends State<ParentDashboard> {
       builder: (modalContext) {
         return StatefulBuilder(
           builder: (context, setModalState) {
+            // Auto-load current location when modal opens
+            Future<void> loadCurrentLocationOnOpen() async {
+              try {
+                final position = await _getCurrentParentPosition();
+                if (position != null && setModalState != null) {
+                  final currentLocation = LatLng(position.latitude, position.longitude);
+                  setModalState(() => tempSelectedLocation = currentLocation);
+                  _pendingChildMapCameraTarget = currentLocation;
+                  await _focusChildLocationOnMap(currentLocation, zoom: 16);
+                }
+              } catch (e) {
+                print("Error loading current location: $e");
+              }
+            }
+            
+            // Call on first build
+            WidgetsBinding.instance.addPostFrameCallback((_) async {
+              if (mounted) {
+                await loadCurrentLocationOnOpen();
+              }
+            });
+            
             Future<void> useCurrentInModal() async {
               setModalState(() => loadingCurrent = true);
               try {
@@ -1089,7 +1141,7 @@ class _ParentDashboardState extends State<ParentDashboard> {
     final parentChildren = List<Map<String, dynamic>>.from(data['children'] ?? []);
 
     Future<void> saveChild() async {
-      final validationError = _validateChildForm();
+      final validationError = _validateChildForm(parentChildren);
       if (validationError != null) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -1274,16 +1326,88 @@ class _ParentDashboardState extends State<ParentDashboard> {
                   ),
             ),
             const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _openParentLocationPickerModal,
-              icon: const Icon(Icons.map_outlined, size: 18),
-              label: Text(
-                _selectedParentLocation == null
-                    ? 'Open map picker'
-                    : 'Update location on map',
-              ),
+            Row(
+              children: [
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _openParentLocationPickerModal,
+                    icon: const Icon(Icons.map_outlined, size: 18),
+                    label: Text(
+                      _selectedParentLocation == null
+                          ? 'Open map picker'
+                          : 'Update on map',
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    onPressed: _loadingParentLocation
+                        ? null
+                        : () async {
+                            setState(() => _loadingParentLocation = true);
+                            try {
+                              final pos = await _getCurrentParentPosition();
+                              if (pos != null && mounted) {
+                                setState(() {
+                                  _selectedParentLocation =
+                                      LatLng(pos.latitude, pos.longitude);
+                                });
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Current location selected'),
+                                    backgroundColor: AppTheme.success,
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                              } else if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  const SnackBar(
+                                    content: Text('Unable to fetch current location.'),
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                              }
+                            } finally {
+                              if (mounted) {
+                                setState(() => _loadingParentLocation = false);
+                              }
+                            }
+                          },
+                    icon: _loadingParentLocation
+                        ? const SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.my_location_rounded, size: 18),
+                    label: const Text('Use current'),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 6),
+            if (_selectedParentLocation != null) ...[
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.success.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.check_circle_rounded, color: AppTheme.success, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Location added successfully',
+                        style: TextStyle(fontSize: 13, color: AppTheme.textSecondary),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
             const SizedBox(height: 8),
             SizedBox(height: AppTheme.verticalSpacing(context) * 2),
             if (_isUploading)
@@ -1430,16 +1554,56 @@ class _ParentDashboardState extends State<ParentDashboard> {
                         child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if ((child['photo'] ?? '').toString().isNotEmpty)
-                                ClipRRect(
-                                  borderRadius: BorderRadius.circular(12),
-                                  child: Image.network(child['photo'].toString(), height: 100, width: double.infinity, fit: BoxFit.cover),
+                              Center(
+                                child: Padding(
+                                  padding: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context) * 2),
+                                  child: FittedBox(
+                                    fit: BoxFit.scaleDown,
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        // Child Avatar
+                                        GestureDetector(
+                                          onTap: () {
+                                            final url = child['photo']?.toString() ?? '';
+                                            if (url.isNotEmpty) {
+                                              _viewImage('Child: ${child['name']}', NetworkImage(url));
+                                            }
+                                          },
+                                          child: _circularAvatar(
+                                            imageUrl: child['photo']?.toString() ?? '',
+                                            label: 'Child',
+                                            radius: 45,
+                                          ),
+                                        ),
+                                        const SizedBox(width: 20),
+                                        // Connection Icon
+                                        Icon(Icons.swap_horiz_rounded, color: AppTheme.primary.withOpacity(0.3), size: 28),
+                                        const SizedBox(width: 20),
+                                        // Driver Avatar
+                                        GestureDetector(
+                                          onTap: () {
+                                            final url = driverData['profilePic']?.toString() ?? '';
+                                            if (url.isNotEmpty) {
+                                              _viewImage('Driver: ${driverData['name']}', NetworkImage(url));
+                                            }
+                                          },
+                                          child: _circularAvatar(
+                                            imageUrl: driverData['profilePic']?.toString() ?? '',
+                                            label: 'Driver',
+                                            radius: 45,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
                                 ),
-                              if ((child['photo'] ?? '').toString().isNotEmpty) SizedBox(height: AppTheme.verticalSpacing(context)),
+                              ),
                               _driverInfoRow(Icons.person_rounded, 'Driver', driverData['name']?.toString() ?? '—'),
-                              _driverInfoRow(Icons.badge_rounded, 'CNIC', driverData['cnic']?.toString() ?? '—'),
-                              _driverInfoRow(Icons.drive_eta_rounded, 'License', driverData['licenseNumber']?.toString() ?? '—'),
-                              _driverInfoRow(Icons.directions_car_rounded, 'Vehicle', '${driverData['vehicleName'] ?? '—'} (${driverData['vehicleNumber'] ?? '—'})'),
+                              _driverInfoRow(Icons.phone_rounded, 'Phone Number', driverData['phone']?.toString() ?? '—'),
+                              _driverInfoRow(Icons.directions_car_rounded, 'Vehicle Name', driverData['vehicleName']?.toString() ?? '—'),
+                              _driverInfoRow(Icons.numbers_rounded, 'Vehicle Number', driverData['vehicleNumber']?.toString() ?? '—'),
                               _driverInfoRow(Icons.school_rounded, 'School', driverData['school']?.toString() ?? '—'),
                               _driverInfoRow(Icons.route_rounded, 'Route', driverData['route']?.toString() ?? '—'),
                               _driverInfoRow(Icons.event_seat_rounded, 'Seats', driverData['seats']?.toString() ?? '—'),
@@ -1454,10 +1618,32 @@ class _ParentDashboardState extends State<ParentDashboard> {
                                 ]),
                               ),
                               SizedBox(height: AppTheme.verticalSpacing(context)),
-                              FilledButton.icon(
-                                onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (context) => DriverLocationScreen(childId: childId))),
-                                icon: const Icon(Icons.location_on_rounded, size: 20),
-                                label: const Text('Track driver'),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: FilledButton.icon(
+                                      onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (context) => DriverLocationScreen(childId: childId))),
+                                      icon: const Icon(Icons.location_on_rounded, size: 20),
+                                      label: const Text('Track driver'),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: OutlinedButton.icon(
+                                      onPressed: () async {
+                                        final phone = driverData['phone']?.toString() ?? '';
+                                        if (phone.isNotEmpty) {
+                                          final telUri = Uri(scheme: 'tel', path: phone);
+                                          if (await canLaunchUrl(telUri)) {
+                                            await launchUrl(telUri);
+                                          }
+                                        }
+                                      },
+                                      icon: const Icon(Icons.phone_rounded, size: 20),
+                                      label: const Text('Call driver'),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ],
                           ),
@@ -1517,11 +1703,36 @@ class _ParentDashboardState extends State<ParentDashboard> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 if ((d['profilePic'] ?? '').toString().isNotEmpty)
-                                  ClipRRect(
-                                    borderRadius: BorderRadius.circular(8),
-                                    child: Image.network(d['profilePic'].toString(), height: 72, width: double.infinity, fit: BoxFit.cover),
+                                  Center(
+                                    child: Container(
+                                      margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context) * 1.5),
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(16),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: AppTheme.primary.withOpacity(0.1),
+                                            blurRadius: 12,
+                                            offset: const Offset(0, 4),
+                                          ),
+                                        ],
+                                      ),
+                                      child: ClipRRect(
+                                        borderRadius: BorderRadius.circular(16),
+                                        child: Image.network(
+                                          d['profilePic'].toString(),
+                                          height: 100,
+                                          width: 100,
+                                          fit: BoxFit.cover,
+                                          errorBuilder: (context, error, stackTrace) => Container(
+                                            height: 100,
+                                            width: 100,
+                                            color: AppTheme.primary.withOpacity(0.1),
+                                            child: Icon(Icons.person_rounded, size: 50, color: AppTheme.primary.withOpacity(0.5)),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
                                   ),
-                                if ((d['profilePic'] ?? '').toString().isNotEmpty) SizedBox(height: AppTheme.verticalSpacing(context)),
                                 _driverInfoRow(Icons.person_rounded, 'Name', d['name']?.toString() ?? '—'),
                                 _driverInfoRow(Icons.badge_rounded, 'CNIC', d['cnic']?.toString() ?? '—'),
                                 _driverInfoRow(Icons.directions_car_rounded, 'Vehicle', '${d['vehicleName'] ?? '—'} (${d['vehicleNumber'] ?? '—'})'),
@@ -1595,6 +1806,80 @@ class _ParentDashboardState extends State<ParentDashboard> {
     );
   }
 
+  Widget _circularAvatar({required String imageUrl, required String label, double radius = 40}) {
+    return Column(
+      children: [
+        Container(
+          padding: const EdgeInsets.all(3),
+          decoration: BoxDecoration(
+            shape: BoxShape.circle,
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                AppTheme.primary.withOpacity(0.5),
+                AppTheme.accent.withOpacity(0.5),
+              ],
+            ),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.primary.withOpacity(0.15),
+                blurRadius: 16,
+                offset: const Offset(0, 8),
+              ),
+            ],
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(2),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              shape: BoxShape.circle,
+            ),
+            child: CircleAvatar(
+              radius: radius,
+              backgroundColor: AppTheme.subtleSurface,
+              backgroundImage: imageUrl.isNotEmpty ? NetworkImage(imageUrl) : null,
+              child: imageUrl.isEmpty
+                  ? Icon(Icons.person_rounded, size: radius, color: AppTheme.primary.withOpacity(0.5))
+                  : null,
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 12,
+            color: AppTheme.textSecondary,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.8,
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _viewImage(String label, ImageProvider img) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => Scaffold(
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            title: Text(label),
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+          ),
+          body: InteractiveViewer(
+            child: Center(
+              child: Image(image: img, fit: BoxFit.contain),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _driverInfoRow(IconData icon, String label, String value) {
     return Padding(
       padding: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context) * 0.5),
@@ -1652,8 +1937,18 @@ class _ParentDashboardState extends State<ParentDashboard> {
 
         return Scaffold(
           backgroundColor: AppTheme.surface,
-          body: SafeArea(child: pages[_selectedIndex]),
-          appBar: AppBar(title: Text(_navItems[_selectedIndex].label)),
+          appBar: AppBar(
+            title: Text(_navItems[_selectedIndex].label),
+            actions: [
+              if (_selectedIndex == 2)
+                IconButton(
+                  icon: const Icon(Icons.notifications_active_outlined),
+                  onPressed: () {
+                    setState(() => _selectedIndex = 1);
+                  },
+                ),
+            ],
+          ),
           drawer: Drawer(
             child: SafeArea(
               child: Column(
@@ -1718,6 +2013,33 @@ class _ParentDashboardState extends State<ParentDashboard> {
                 ],
               ),
             ),
+          ),
+          body: Stack(
+            children: [
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        AppTheme.primary.withOpacity(0.04),
+                        AppTheme.surface,
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: -80,
+                right: -80,
+                child: CircleAvatar(
+                  radius: 120,
+                  backgroundColor: AppTheme.primary.withOpacity(0.03),
+                ),
+              ),
+              SafeArea(child: pages[_selectedIndex]),
+            ],
           ),
         );
       },

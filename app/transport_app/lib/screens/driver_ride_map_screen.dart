@@ -1,25 +1,25 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:google_maps_flutter/google_maps_flutter.dart';
+import '../services/directions_service.dart';
 
 class DriverRideMapScreen extends StatefulWidget {
   final String childName;
   final String rideModeLabel;
-  final String pickupLabel;
-  final String destinationLabel;
-  final LatLng pickupLocation;
-  final LatLng destinationLocation;
+  final LatLng parentLocation;
+  final LatLng schoolLocation;
+  final bool isMorningRide;
   final bool liveTrackingMode;
 
   const DriverRideMapScreen({
     super.key,
     required this.childName,
     required this.rideModeLabel,
-    required this.pickupLabel,
-    required this.destinationLabel,
-    required this.pickupLocation,
-    required this.destinationLocation,
+    required this.parentLocation,
+    required this.schoolLocation,
+    required this.isMorningRide,
     required this.liveTrackingMode,
   });
 
@@ -31,11 +31,31 @@ class _DriverRideMapScreenState extends State<DriverRideMapScreen> {
   GoogleMapController? _mapController;
   StreamSubscription<Position>? _positionSub;
   LatLng? _driverPosition;
+  List<LatLng>? _roadRoutePoints;
 
   @override
   void initState() {
     super.initState();
+    _loadRoadRoute();
     _startDriverPositionUpdates();
+  }
+  
+  Future<void> _loadRoadRoute() async {
+    try {
+      final start = widget.isMorningRide ? widget.parentLocation : widget.schoolLocation;
+      final end = widget.isMorningRide ? widget.schoolLocation : widget.parentLocation;
+      final points = await getRoadRoutePoints(
+        originLat: start.latitude,
+        originLng: start.longitude,
+        destLat: end.latitude,
+        destLng: end.longitude,
+      );
+      if (mounted && points != null) {
+        setState(() => _roadRoutePoints = points);
+      }
+    } catch (e) {
+      print("Error loading road route: $e");
+    }
   }
 
   @override
@@ -73,8 +93,8 @@ class _DriverRideMapScreenState extends State<DriverRideMapScreen> {
   void _fitMapBounds() {
     if (_mapController == null) return;
     final points = <LatLng>[
-      widget.pickupLocation,
-      widget.destinationLocation,
+      widget.parentLocation,
+      widget.schoolLocation,
       if (_driverPosition != null) _driverPosition!,
     ];
 
@@ -104,38 +124,39 @@ class _DriverRideMapScreenState extends State<DriverRideMapScreen> {
   Widget build(BuildContext context) {
     final markers = <Marker>{
       Marker(
-        markerId: const MarkerId('pickup'),
-        position: widget.pickupLocation,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
-        infoWindow: InfoWindow(title: 'Pickup: ${widget.pickupLabel}'),
+        markerId: const MarkerId('parent'),
+        position: widget.parentLocation,
+        icon: kIsWeb ? BitmapDescriptor.defaultMarker : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
+        infoWindow: InfoWindow(title: "Parent's Location"),
       ),
       Marker(
-        markerId: const MarkerId('destination'),
-        position: widget.destinationLocation,
-        icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueRed),
-        infoWindow: InfoWindow(title: 'Destination: ${widget.destinationLabel}'),
+        markerId: const MarkerId('school'),
+        position: widget.schoolLocation,
+        icon: kIsWeb ? BitmapDescriptor.defaultMarker : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueGreen),
+        infoWindow: const InfoWindow(title: 'School'),
       ),
       if (_driverPosition != null)
         Marker(
           markerId: const MarkerId('driver'),
           position: _driverPosition!,
-          icon: BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
-          infoWindow: const InfoWindow(title: 'Driver live location'),
+          icon: kIsWeb ? BitmapDescriptor.defaultMarker : BitmapDescriptor.defaultMarkerWithHue(BitmapDescriptor.hueAzure),
+          infoWindow: const InfoWindow(title: 'Your Current Location'),
         ),
     };
 
     final polylines = <Polyline>{
-      Polyline(
-        polylineId: const PolylineId('route'),
-        points: [widget.pickupLocation, widget.destinationLocation],
-        color: Colors.blue,
-        width: 5,
-      ),
+      if (_roadRoutePoints != null && _roadRoutePoints!.isNotEmpty)
+        Polyline(
+          polylineId: const PolylineId('route'),
+          points: _roadRoutePoints!,
+          color: Colors.blue,
+          width: 5,
+        ),
     };
 
     final initialCenter = LatLng(
-      (widget.pickupLocation.latitude + widget.destinationLocation.latitude) / 2,
-      (widget.pickupLocation.longitude + widget.destinationLocation.longitude) / 2,
+      (widget.parentLocation.latitude + widget.schoolLocation.latitude) / 2,
+      (widget.parentLocation.longitude + widget.schoolLocation.longitude) / 2,
     );
 
     return Scaffold(
@@ -149,8 +170,8 @@ class _DriverRideMapScreenState extends State<DriverRideMapScreen> {
               initialCameraPosition: CameraPosition(target: initialCenter, zoom: 13),
               markers: markers,
               polylines: polylines,
-              myLocationEnabled: true,
-              myLocationButtonEnabled: true,
+              myLocationEnabled: !kIsWeb,
+              myLocationButtonEnabled: !kIsWeb,
               onMapCreated: (controller) {
                 _mapController = controller;
                 _fitMapBounds();
@@ -166,8 +187,8 @@ class _DriverRideMapScreenState extends State<DriverRideMapScreen> {
                 padding: const EdgeInsets.all(12),
                 child: Text(
                   widget.liveTrackingMode
-                      ? 'Live tracking mode is ON. Destination stays visible while your location updates.'
-                      : 'Pickup and destination are ready. Move within 100m of pickup to enable Start Ride.',
+                      ? 'Live tracking mode is ON. You must be within 100m of the destination to stop the ride.'
+                      : 'Pickup and dropoff locations are marked. Tap Start Ride when you are ready to begin.',
                   textAlign: TextAlign.center,
                 ),
               ),

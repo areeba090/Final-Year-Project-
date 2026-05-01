@@ -45,5 +45,11 @@
 	<true/>
 	<key>UIApplicationSupportsIndirectInputEvents</key>
 	<true/>
+	
+	<!-- Location permissions -->
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>This app needs access to your location to track your ride and share it with parents.</string>
+	<key>NSLocationAlwaysUsageDescription</key>
+	<string>This app needs background location access to accurately track the route while driving.</string>
 </dict>
 </plist>

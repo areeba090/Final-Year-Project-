@@ -14,6 +14,7 @@ import 'driver_location_screen.dart';
 import 'driver_parent_location_screen.dart';
 import 'driver_ride_map_screen.dart';
 import 'login_screen.dart';
+import '../services/directions_service.dart';
 
 class DriverDashboard extends StatefulWidget {
   const DriverDashboard({Key? key}) : super(key: key);
@@ -27,6 +28,14 @@ class _DriverDashboardState extends State<DriverDashboard> {
   final _storage = FirebaseStorage.instance;
   final _user = FirebaseAuth.instance.currentUser!;
   int _index = 0;
+  final Map<String, Future<DocumentSnapshot>> _parentFutures = {};
+
+  Future<DocumentSnapshot> _getParentFuture(String parentId) {
+    if (!_parentFutures.containsKey(parentId)) {
+      _parentFutures[parentId] = _firestore.collection('users').doc(parentId).get();
+    }
+    return _parentFutures[parentId]!;
+  }
 
   Uint8List? _profilePic, _cnicPic, _licensePic, _vehiclePic;
   bool _loadingProfile = false, _loadingCnic = false, _loadingLicense = false, _loadingVehicle = false;
@@ -52,27 +61,36 @@ class _DriverDashboardState extends State<DriverDashboard> {
     required Widget child,
     EdgeInsetsGeometry? margin,
     EdgeInsetsGeometry? padding,
+    Color? baseColor,
   }) {
     return Container(
       margin: margin,
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(24),
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Colors.white, AppTheme.subtleSurface.withOpacity(0.55)],
+          colors: [
+            baseColor ?? Colors.white,
+            AppTheme.subtleSurface.withOpacity(0.4),
+          ],
         ),
-        border: Border.all(color: Colors.white.withOpacity(0.9)),
         boxShadow: [
           BoxShadow(
-            color: AppTheme.primary.withOpacity(0.08),
-            blurRadius: 20,
-            offset: const Offset(0, 8),
+            color: AppTheme.primary.withOpacity(0.06),
+            blurRadius: 30,
+            offset: const Offset(0, 12),
+          ),
+          BoxShadow(
+            color: Colors.white,
+            blurRadius: 0,
+            offset: const Offset(-2, -2),
           ),
         ],
+        border: Border.all(color: Colors.white.withOpacity(0.8), width: 1.5),
       ),
       child: ClipRRect(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(24),
         child: Padding(
           padding: padding ?? EdgeInsets.all(AppTheme.horizontalPadding(context)),
           child: child,
@@ -162,6 +180,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
     ImageProvider? img = local != null
         ? MemoryImage(local)
         : (url != null && url.isNotEmpty ? NetworkImage(url) : null);
+    
     bool isLoading = (type == 'profilePic')
         ? _loadingProfile
         : (type == 'cnicPic')
@@ -169,60 +188,88 @@ class _DriverDashboardState extends State<DriverDashboard> {
             : (type == 'licensePic')
                 ? _loadingLicense
                 : _loadingVehicle;
-    final isNarrow = AppTheme.isNarrow(context);
+
     return _premiumCard(
       margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
-      padding: EdgeInsets.all(isNarrow ? 12 : 16),
-      child: Row(
-          children: [
-            CircleAvatar(
-              radius: isNarrow ? 24 : 28,
-              backgroundImage: img,
-              backgroundColor: AppTheme.divider,
-              child: img == null ? Icon(Icons.person, color: AppTheme.textSecondary) : null,
-            ),
-            SizedBox(width: isNarrow ? 12 : 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label, style: const TextStyle(fontWeight: FontWeight.w600, color: AppTheme.textPrimary)),
-                  if (isNarrow)
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        _smallButton(context, 'Upload', () => _pickUpload(type), isLoading),
-                        if (img != null) _smallButton(context, 'View', () => _viewImage(label, img!), false),
-                      ],
-                    )
-                  else
-                    const SizedBox(height: 4),
-                ],
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Container(
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(color: AppTheme.primary.withOpacity(0.1), width: 2),
+                ),
+                child: CircleAvatar(
+                  radius: 28,
+                  backgroundImage: img,
+                  backgroundColor: AppTheme.subtleSurface,
+                  child: img == null ? const Icon(Icons.person_rounded, color: AppTheme.textSecondary) : null,
+                ),
               ),
-            ),
-            if (!isNarrow) ...[
+              const SizedBox(width: 16),
+              Expanded(
+                child: Text(
+                  label,
+                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: AppTheme.textPrimary),
+                ),
+              ),
               if (isLoading)
                 const SizedBox(width: 24, height: 24, child: CircularProgressIndicator(strokeWidth: 2))
+              else if (AppTheme.isNarrow(context))
+                const SizedBox.shrink()
               else
-                ElevatedButton(onPressed: () => _pickUpload(type), child: const Text('Upload')),
-              if (img != null) ...[
-                const SizedBox(width: 8),
-                OutlinedButton(onPressed: () => _viewImage(label, img!), child: const Text('View')),
-              ],
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    _smallButton(context, 'Upload', () => _pickUpload(type), false),
+                    if (img != null) ...[
+                      const SizedBox(width: 8),
+                      _smallButton(context, 'View', () => _viewImage(label, img!), false),
+                    ],
+                  ],
+                ),
             ],
+          ),
+          if (AppTheme.isNarrow(context)) ...[
+            const SizedBox(height: 12),
+            Row(
+              children: [
+                Expanded(child: _smallButton(context, 'Upload', () => _pickUpload(type), false)),
+                if (img != null) ...[
+                  const SizedBox(width: 8),
+                  Expanded(child: _smallButton(context, 'View', () => _viewImage(label, img!), false)),
+                ],
+              ],
+            ),
           ],
-        ),
+        ],
+      ),
     );
   }
 
   Widget _smallButton(BuildContext context, String label, VoidCallback onPressed, bool loading) {
     if (loading) return const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2));
     return SizedBox(
-      height: 32,
+      height: 38,
       child: label == 'Upload'
-          ? ElevatedButton(onPressed: onPressed, child: Text(label))
-          : OutlinedButton(onPressed: onPressed, child: Text(label)),
+          ? ElevatedButton(
+              onPressed: onPressed,
+              style: ElevatedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                minimumSize: Size.zero,
+              ),
+              child: Text(label),
+            )
+          : OutlinedButton(
+              onPressed: onPressed,
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                minimumSize: Size.zero,
+              ),
+              child: Text(label),
+            ),
     );
   }
 
@@ -231,8 +278,17 @@ class _DriverDashboardState extends State<DriverDashboard> {
       context,
       MaterialPageRoute(
         builder: (_) => Scaffold(
-          appBar: AppBar(title: Text(label)),
-          body: SafeArea(child: Center(child: Image(image: img))),
+          backgroundColor: Colors.black,
+          appBar: AppBar(
+            title: Text(label),
+            backgroundColor: Colors.black,
+            foregroundColor: Colors.white,
+          ),
+          body: InteractiveViewer(
+            child: Center(
+              child: Image(image: img, fit: BoxFit.contain),
+            ),
+          ),
         ),
       ),
     );
@@ -252,6 +308,17 @@ class _DriverDashboardState extends State<DriverDashboard> {
       }
       return;
     }
+
+    final routeName = (child['route'] ?? '').toString();
+    double schoolLat = 0, schoolLng = 0;
+    if (routeName.isNotEmpty) {
+      final bounds = await getRouteBoundsByRouteName(_firestore, routeName);
+      if (bounds != null) {
+        schoolLat = bounds.startLat;
+        schoolLng = bounds.startLng;
+      }
+    }
+
     if (!mounted) return;
     Navigator.push(
       context,
@@ -260,6 +327,8 @@ class _DriverDashboardState extends State<DriverDashboard> {
           childName: (child['name'] ?? 'Child').toString(),
           parentLatitude: lat,
           parentLongitude: lng,
+          schoolLatitude: schoolLat,
+          schoolLongitude: schoolLng,
         ),
       ),
     );
@@ -295,6 +364,22 @@ class _DriverDashboardState extends State<DriverDashboard> {
         setState(() => _savingProfile = false);
       }
     }
+  }
+
+  bool _isProfileComplete(Map<String, dynamic> d) {
+    final requiredFields = [
+      'name', 'cnic', 'phone', 'licenseNumber', 
+      'vehicleName', 'vehicleNumber', 'school', 'route', 'seats',
+      'profilePic', 'cnicPic', 'licensePic', 'vehiclePic'
+    ];
+    for (final field in requiredFields) {
+      if ((d[field] ?? '').toString().trim().isEmpty) return false;
+    }
+    // Specific checks
+    if ((d['cnic'] ?? '').toString().length != 13) return false;
+    if ((d['phone'] ?? '').toString().length != 11) return false;
+    
+    return true;
   }
 
   Future<Position?> _resolveCurrentPosition() async {
@@ -499,27 +584,6 @@ class _DriverDashboardState extends State<DriverDashboard> {
     return _selectedRideModeByChild[childId] ?? _RideMode.morning;
   }
 
-  ({double pickupLat, double pickupLng, double destinationLat, double destinationLng})
-      _getRideEndpoints({
-    required RouteBounds bounds,
-    required _RideMode rideMode,
-  }) {
-    if (rideMode == _RideMode.morning) {
-      return (
-        pickupLat: bounds.endLat,
-        pickupLng: bounds.endLng,
-        destinationLat: bounds.startLat,
-        destinationLng: bounds.startLng,
-      );
-    }
-    return (
-      pickupLat: bounds.startLat,
-      pickupLng: bounds.startLng,
-      destinationLat: bounds.endLat,
-      destinationLng: bounds.endLng,
-    );
-  }
-
   Widget _assignedChildren(Map<String, dynamic> driverData) {
     return StreamBuilder<QuerySnapshot>(
       stream: _firestore.collection('requests').where('driverId', isEqualTo: _user.uid).where('status', isEqualTo: 'approved').snapshots(),
@@ -550,7 +614,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
           child: Column(
             children: uniqueParentIds.map((parentId) {
               return FutureBuilder<DocumentSnapshot>(
-                future: _firestore.collection('users').doc(parentId).get(),
+                future: _getParentFuture(parentId),
                 builder: (context, parentSnap) {
                   if (!parentSnap.hasData) return const SizedBox();
                   final parentData = parentSnap.data!.data() as Map<String, dynamic>? ?? {};
@@ -559,12 +623,17 @@ class _DriverDashboardState extends State<DriverDashboard> {
                   if (assignedChildren.isEmpty) return const SizedBox();
                   WidgetsBinding.instance.addPostFrameCallback((_) {
                     if (!mounted) return;
-                    setState(() {
-                      for (final c in assignedChildren) {
-                        final id = c['id']?.toString();
-                        if (id != null) _childToParent[id] = parentId;
+                    bool changed = false;
+                    for (final c in assignedChildren) {
+                      final id = c['id']?.toString();
+                      if (id != null && _childToParent[id] != parentId) {
+                        _childToParent[id] = parentId;
+                        changed = true;
                       }
-                    });
+                    }
+                    if (changed) {
+                      setState(() {});
+                    }
                   });
 
                   return Column(
@@ -574,8 +643,8 @@ class _DriverDashboardState extends State<DriverDashboard> {
                       final isChildOnRide = _childrenOnRide.contains(childId);
                       final isActionLoading = _rideActionChildId == childId;
                       final selectedRideMode = _getRideModeForChild(childId);
-                      final pickupLabel = selectedRideMode == _RideMode.morning ? 'Home' : 'School';
-                      final destinationLabel = selectedRideMode == _RideMode.morning ? 'School' : 'Home';
+                      final pickupLabel = selectedRideMode == _RideMode.morning ? "Parent's Home" : 'School';
+                      final destinationLabel = selectedRideMode == _RideMode.morning ? 'School' : "Parent's Home";
                       return _premiumCard(
                         margin: EdgeInsets.only(bottom: AppTheme.verticalSpacing(context)),
                         child: Column(
@@ -661,28 +730,26 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                                   _firestore,
                                                   routeName,
                                                 );
-                                                if (bounds == null || !mounted) return;
-                                                final endpoints = _getRideEndpoints(
-                                                  bounds: bounds,
-                                                  rideMode: selectedRideMode,
-                                                );
-                                                await Navigator.push(
-                                                  context,
-                                                  MaterialPageRoute(
-                                                    builder: (_) => DriverRideMapScreen(
-                                                      childName: (child['name'] ?? 'Child').toString(),
-                                                      rideModeLabel: selectedRideMode == _RideMode.morning
-                                                          ? 'Morning Ride'
-                                                          : 'Evening Ride',
-                                                      pickupLabel: pickupLabel,
-                                                      destinationLabel: destinationLabel,
-                                                      pickupLocation: LatLng(endpoints.pickupLat, endpoints.pickupLng),
-                                                      destinationLocation: LatLng(endpoints.destinationLat, endpoints.destinationLng),
-                                                      liveTrackingMode: isChildOnRide,
+                                                 if (bounds == null || !mounted) return;
+                                                 final parentLat = (child['parentLatitude'] as num?)?.toDouble();
+                                                 final parentLng = (child['parentLongitude'] as num?)?.toDouble();
+
+                                                 await Navigator.push(
+                                                   context,
+                                                   MaterialPageRoute(
+                                                     builder: (_) => DriverRideMapScreen(
+                                                       childName: (child['name'] ?? 'Child').toString(),
+                                                       rideModeLabel: selectedRideMode == _RideMode.morning
+                                                           ? 'Morning Ride'
+                                                           : 'Evening Ride',
+                                                       parentLocation: LatLng(parentLat ?? bounds.startLat, parentLng ?? bounds.startLng),
+                                                       schoolLocation: LatLng(bounds.startLat, bounds.startLng),
+                                                       isMorningRide: selectedRideMode == _RideMode.morning,
+                                                       liveTrackingMode: isChildOnRide,
+                                                      ),
                                                     ),
-                                                  ),
-                                                );
-                                              },
+                                                  );
+                                                },
                                         icon: const Icon(Icons.map_outlined, size: 18),
                                         label: Text(narrow ? 'Map' : 'Show map'),
                                       ),
@@ -767,39 +834,45 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                                     return;
                                                   }
 
-                                                  final endpoints = _getRideEndpoints(
-                                                    bounds: bounds,
-                                                    rideMode: selectedRideMode,
-                                                  );
-                                                  final targetLat = newRideOn
-                                                      ? endpoints.pickupLat
-                                                      : endpoints.destinationLat;
-                                                  final targetLng = newRideOn
-                                                      ? endpoints.pickupLng
-                                                      : endpoints.destinationLng;
-                                                  final distanceMeters =
-                                                      Geolocator.distanceBetween(
-                                                    currentPosition.latitude,
-                                                    currentPosition.longitude,
-                                                    targetLat,
-                                                    targetLng,
-                                                  );
-                                                  if (distanceMeters >
-                                                      _rideActionAllowedMeters) {
-                                                    final actionText = newRideOn
-                                                        ? 'start'
-                                                        : 'stop';
-                                                    if (mounted) {
-                                                      ScaffoldMessenger.of(context).showSnackBar(
-                                                        SnackBar(
-                                                          content: Text(
-                                                            'You can only $actionText ride within 100m of the expected location.',
+                                                  final parentLat = (child['parentLatitude'] as num?)?.toDouble();
+                                                  final parentLng = (child['parentLongitude'] as num?)?.toDouble();
+                                                  
+                                                  // Set GPS tracking bounds based on ride mode
+                                                  double startLatForBounds, startLngForBounds, endLatForBounds, endLngForBounds;
+                                                  
+                                                  if (selectedRideMode == _RideMode.morning) {
+                                                    // Morning ride: Parent home → School
+                                                    startLatForBounds = parentLat ?? bounds.startLat;
+                                                    startLngForBounds = parentLng ?? bounds.startLng;
+                                                    endLatForBounds = bounds.startLat;
+                                                    endLngForBounds = bounds.startLng;
+                                                  } else {
+                                                    // Evening ride: School → Parent home
+                                                    startLatForBounds = bounds.startLat;
+                                                    startLngForBounds = bounds.startLng;
+                                                    endLatForBounds = parentLat ?? bounds.endLat;
+                                                    endLngForBounds = parentLng ?? bounds.endLng;
+                                                  }
+
+                                                  if (!newRideOn) {
+                                                    final distanceToDest = Geolocator.distanceBetween(
+                                                      currentPosition.latitude,
+                                                      currentPosition.longitude,
+                                                      endLatForBounds,
+                                                      endLngForBounds,
+                                                    );
+                                                    if (distanceToDest > 50) {
+                                                      if (mounted) {
+                                                        ScaffoldMessenger.of(context).showSnackBar(
+                                                          const SnackBar(
+                                                            content: Text('Move within 50m of destination to stop the ride.'),
+                                                            backgroundColor: AppTheme.error,
+                                                            behavior: SnackBarBehavior.floating,
                                                           ),
-                                                          behavior: SnackBarBehavior.floating,
-                                                        ),
-                                                      );
+                                                        );
+                                                      }
+                                                      return;
                                                     }
-                                                    return;
                                                   }
 
                                                   final childName = child['name'] ?? 'your child';
@@ -813,16 +886,36 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                                   });
                                                   if (_childrenOnRide.isNotEmpty) {
                                                     final parentIds = _childrenOnRide.map((c) => _childToParent[c]).whereType<String>().toSet().toList();
-                                                    final endpoints = _getRideEndpoints(
-                                                      bounds: bounds,
-                                                      rideMode: selectedRideMode,
+                                                    
+                                                    final routePoints = await getRoadRoutePoints(
+                                                      originLat: startLatForBounds,
+                                                      originLng: startLngForBounds,
+                                                      destLat: endLatForBounds,
+                                                      destLng: endLngForBounds,
                                                     );
+
                                                     final driverBounds = DriverRouteBounds(
-                                                      startLat: endpoints.pickupLat,
-                                                      startLng: endpoints.pickupLng,
-                                                      endLat: endpoints.destinationLat,
-                                                      endLng: endpoints.destinationLng,
+                                                      startLat: startLatForBounds,
+                                                      startLng: startLngForBounds,
+                                                      endLat: endLatForBounds,
+                                                      endLng: endLngForBounds,
+                                                      polylinePoints: routePoints?.map((p) => (p.latitude, p.longitude)).toList(),
                                                     );
+                                                    
+                                                    // Initialize driverLocations doc immediately so parent sees driver right away
+                                                    if (newRideOn) {
+                                                      try {
+                                                        await _firestore.collection('driverLocations').doc(_user.uid).set({
+                                                          'status': 'onRide',
+                                                          'timestamp': FieldValue.serverTimestamp(),
+                                                          'latitude': currentPosition.latitude,
+                                                          'longitude': currentPosition.longitude,
+                                                        }, SetOptions(merge: true));
+                                                      } catch (e) {
+                                                        print('Failed to initialize driverLocations: $e');
+                                                      }
+                                                    }
+                                                    
                                                     if (GPSController.isTracking) {
                                                       GPSController.updateRideParents(parentIds);
                                                     } else {
@@ -833,7 +926,7 @@ class _DriverDashboardState extends State<DriverDashboard> {
                                                         if (mounted) {
                                                           ScaffoldMessenger.of(context).showSnackBar(
                                                             SnackBar(
-                                                              content: const Text('GPS permission required. Please enable location services in settings.'),
+                                                              content: const Text('GPS failed to start. Please check location services in settings.'),
                                                               backgroundColor: AppTheme.error,
                                                               behavior: SnackBarBehavior.floating,
                                                             ),
@@ -996,6 +1089,15 @@ class _DriverDashboardState extends State<DriverDashboard> {
       builder: (_, snap) {
         if (!snap.hasData) return const Scaffold(body: Center(child: CircularProgressIndicator()));
         final data = snap.data!.data() as Map<String, dynamic>? ?? {};
+        final isComplete = _isProfileComplete(data);
+        
+        // Force profile tab if incomplete
+        if (!isComplete && _index != 0) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _index != 0) setState(() => _index = 0);
+          });
+        }
+
         final pages = [
           _profile(data),
           _dashboard(data),
@@ -1007,80 +1109,151 @@ class _DriverDashboardState extends State<DriverDashboard> {
 
         return Scaffold(
           backgroundColor: AppTheme.surface,
-          body: SafeArea(
-            child: pages[_index],
-          ),
+          drawer: _drawer(data, isComplete),
           appBar: AppBar(
             title: Text(_navItems[_index].label),
+            actions: [
+              if (_index == 0 && isComplete)
+                IconButton(
+                  icon: const Icon(Icons.notifications_outlined),
+                  onPressed: () => setState(() => _index = 2),
+                ),
+            ],
           ),
-          drawer: Drawer(
-            child: SafeArea(
-              child: Column(
-                children: [
-                  Container(
-                    width: double.infinity,
-                    padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
-                    decoration: const BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [AppTheme.primary, AppTheme.primaryDark],
-                      ),
-                    ),
-                    child: Column(
-                      children: [
-                        const SizedBox(height: 16),
-                        CircleAvatar(
-                          radius: 40,
-                          backgroundImage: data['profilePic'] != null ? NetworkImage(data['profilePic']) : null,
-                          backgroundColor: Colors.white24,
-                          child: data['profilePic'] == null ? const Icon(Icons.person, size: 40, color: Colors.white) : null,
-                        ),
-                        const SizedBox(height: 12),
-                        Text(data['name'] ?? 'Driver', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.white)),
-                        const SizedBox(height: 4),
-                        Text(data['phone'] ?? '', style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.9))),
-                        const SizedBox(height: 16),
+          body: Stack(
+            children: [
+              Positioned.fill(
+                child: Container(
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topCenter,
+                      end: Alignment.bottomCenter,
+                      colors: [
+                        AppTheme.primary.withOpacity(0.04),
+                        AppTheme.surface,
                       ],
                     ),
                   ),
-                  Expanded(
-                    child: ListView(
-                      padding: EdgeInsets.symmetric(vertical: AppTheme.verticalSpacing(context)),
-                      children: [
-                        ..._navItems.asMap().entries.map((e) {
-                          final selected = _index == e.key;
-                          return _drawerNavTile(
-                            icon: e.value.icon,
-                            label: e.value.label,
-                            selected: selected,
-                            onTap: () {
-                              setState(() => _index = e.key);
-                              Navigator.pop(context);
-                            },
-                          );
-                        }),
-                        const Divider(height: 24),
-                        _drawerNavTile(
-                          icon: Icons.logout_rounded,
-                          label: 'Logout',
-                          selected: false,
-                          onTap: () async {
-                            await FirebaseAuth.instance.signOut();
-                            if (context.mounted) {
-                              Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
-                            }
-                          },
+                ),
+              ),
+              Positioned(
+                top: -80,
+                right: -80,
+                child: CircleAvatar(
+                  radius: 120,
+                  backgroundColor: AppTheme.primary.withOpacity(0.03),
+                ),
+              ),
+              SafeArea(
+                child: Column(
+                  children: [
+                    if (!isComplete)
+                      Container(
+                        width: double.infinity,
+                        color: AppTheme.error.withOpacity(0.1),
+                        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 16),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.warning_amber_rounded, color: AppTheme.error, size: 20),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Text(
+                                'Complete your profile to unlock all features',
+                                style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: AppTheme.error),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                    Expanded(child: pages[_index]),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _drawer(Map<String, dynamic> data, bool isComplete) {
+    return Drawer(
+      child: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              width: double.infinity,
+              padding: EdgeInsets.all(AppTheme.horizontalPadding(context)),
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [AppTheme.primary, AppTheme.primaryDark],
+                ),
+              ),
+              child: Column(
+                children: [
+                  const SizedBox(height: 16),
+                  CircleAvatar(
+                    radius: 40,
+                    backgroundImage: data['profilePic'] != null ? NetworkImage(data['profilePic']) : null,
+                    backgroundColor: Colors.white24,
+                    child: data['profilePic'] == null ? const Icon(Icons.person, size: 40, color: Colors.white) : null,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(data['name'] ?? 'Driver', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w600, color: Colors.white)),
+                  const SizedBox(height: 4),
+                  Text(data['phone'] ?? '', style: TextStyle(fontSize: 13, color: Colors.white.withOpacity(0.9))),
+                  const SizedBox(height: 16),
+                ],
+              ),
+            ),
+            Expanded(
+              child: ListView(
+                padding: EdgeInsets.symmetric(vertical: AppTheme.verticalSpacing(context)),
+                children: [
+                  ..._navItems.asMap().entries.map((e) {
+                    final isProfileTab = e.key == 0;
+                    final enabled = isProfileTab || isComplete;
+                    final selected = _index == e.key;
+                    
+                    return Opacity(
+                      opacity: enabled ? 1.0 : 0.5,
+                      child: _drawerNavTile(
+                        icon: e.value.icon,
+                        label: e.value.label + (enabled ? '' : ' 🔒'),
+                        selected: selected,
+                        onTap: () {
+                          if (enabled) {
+                            setState(() => _index = e.key);
+                            Navigator.pop(context);
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Please complete and save your profile first')),
+                            );
+                          }
+                        },
+                      ),
+                    );
+                  }),
+                  const Divider(height: 24),
+                  _drawerNavTile(
+                    icon: Icons.logout_rounded,
+                    label: 'Logout',
+                    selected: false,
+                    onTap: () async {
+                      await FirebaseAuth.instance.signOut();
+                      if (context.mounted) {
+                        Navigator.pushReplacement(context, MaterialPageRoute(builder: (_) => const LoginScreen()));
+                      }
+                    },
                   ),
                 ],
               ),
             ),
-          ),
-        );
-      },
+          ],
+        ),
+      ),
     );
   }
 }

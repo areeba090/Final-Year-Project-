@@ -9,11 +9,13 @@ class DriverRouteBounds {
   final double startLng;
   final double endLat;
   final double endLng;
+  final List<(double lat, double lng)>? polylinePoints;
   const DriverRouteBounds({
     required this.startLat,
     required this.startLng,
     required this.endLat,
     required this.endLng,
+    this.polylinePoints,
   });
 }
 
@@ -105,7 +107,7 @@ class GPSController {
         'latitude': position.latitude,
         'longitude': position.longitude,
         'timestamp': FieldValue.serverTimestamp(),
-        'status': 'onRide',
+        'status': _rideInProgress ? 'onRide' : 'online',
       }, SetOptions(merge: true));
 
       final bounds = _routeBounds;
@@ -114,14 +116,23 @@ class GPSController {
           _parentIds.isNotEmpty &&
           position.latitude != 0 &&
           position.longitude != 0) {
-        final distanceMeters = distanceFromPointToSegment(
-          lat: position.latitude,
-          lng: position.longitude,
-          startLat: bounds.startLat,
-          startLng: bounds.startLng,
-          endLat: bounds.endLat,
-          endLng: bounds.endLng,
-        );
+        double distanceMeters;
+        if (bounds.polylinePoints != null && bounds.polylinePoints!.isNotEmpty) {
+          distanceMeters = distanceFromPointToPolyline(
+            lat: position.latitude,
+            lng: position.longitude,
+            points: bounds.polylinePoints!,
+          );
+        } else {
+          distanceMeters = distanceFromPointToSegment(
+            lat: position.latitude,
+            lng: position.longitude,
+            startLat: bounds.startLat,
+            startLng: bounds.startLng,
+            endLat: bounds.endLat,
+            endLng: bounds.endLng,
+          );
+        }
         if (distanceMeters > deviationThresholdMeters && !_deviationNotified) {
           _deviationNotified = true;
           for (final parentId in _parentIds) {
