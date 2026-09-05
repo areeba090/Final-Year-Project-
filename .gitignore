@@ -1,5 +1,29 @@
-# Dependencies
+﻿# Dependencies
 node_modules/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.Python
+venv/
+env/
+ENV/
+.venv/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+parts/
+var/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
 # Flutter
 .dart_tool/
@@ -10,8 +34,10 @@ node_modules/
 .pub/
 build/
 *.iml
+*.dill
 
-# Android (Flutter)
+# Android & Gradle
+.gradle/
 *.apk
 *.aab
 *.dex
@@ -20,6 +46,8 @@ local.properties
 *.jks
 .keychain
 *.keystore
+*.hprof
+nb-cache/
 
 # iOS (Flutter)
 **/ios/Pods/
@@ -27,12 +55,25 @@ local.properties
 **/ios/Flutter/Flutter.framework
 **/ios/Flutter/Flutter.podspec
 **/macos/Flutter/ephemeral/
+**/ephemeral/
 
-# Environment & secrets
+# Environment, Secrets & Credentials
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
+!*.env.example
 *.pem
+*.key
+*.p12
+serviceAccountKey.json
+*serviceAccountKey*.json
+*service-account*.json
+
+# Archives & Large Files
+*.rar
+*.zip
+*.7z
+*.tar.gz
 
 # Build outputs
 dist/
@@ -46,9 +87,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# IDE & OS
+# IDE, Workspaces & OS
 .idea/
 .vscode/
+*.code-workspace
 *.swp
 *.swo
 .DS_Store

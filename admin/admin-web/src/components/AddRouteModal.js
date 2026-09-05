@@ -10,6 +10,7 @@ export default function AddRouteModal({
 }) {
   const [selectedSchool, setSelectedSchool] = useState(null);
   const [destination, setDestination] = useState(null);
+  const [fare, setFare] = useState("");
   const [placeSearchOpen, setPlaceSearchOpen] = useState(false);
 
   const schoolsWithCoords = schools.filter(
@@ -20,12 +21,14 @@ export default function AddRouteModal({
     if (!isOpen) {
       setSelectedSchool(null);
       setDestination(null);
+      setFare("");
       setPlaceSearchOpen(false);
     }
   }, [isOpen]);
 
   const handleSubmit = () => {
-    if (!selectedSchool || !destination) return;
+    const numericFare = Number(fare);
+    if (!selectedSchool || !destination || !Number.isFinite(numericFare) || numericFare <= 0) return;
     onAddRoute({
       schoolName: selectedSchool.name,
       schoolLatitude: selectedSchool.latitude,
@@ -35,6 +38,7 @@ export default function AddRouteModal({
       destinationLatitude: destination.latitude,
       destinationLongitude: destination.longitude,
       destinationAddress: destination.address,
+      fare: numericFare,
     });
     // Parent closes modal after successful save
   };
@@ -42,6 +46,7 @@ export default function AddRouteModal({
   const handleClose = () => {
     setSelectedSchool(null);
     setDestination(null);
+    setFare("");
     setPlaceSearchOpen(false);
     onClose();
   };
@@ -196,6 +201,21 @@ export default function AddRouteModal({
               )}
             </div>
 
+            <div>
+              <label className="block text-sm font-medium text-slate-700 mb-2">
+                Fare (PKR)
+              </label>
+              <input
+                type="number"
+                min="1"
+                step="0.01"
+                value={fare}
+                onChange={(e) => setFare(e.target.value)}
+                placeholder="Enter fare"
+                className="w-full px-4 py-3 border border-slate-200 rounded-xl focus:ring-2 focus:ring-emerald-400 focus:border-emerald-400 bg-white"
+              />
+            </div>
+
             <div className="pt-2 flex gap-3">
               <button
                 type="button"
@@ -207,7 +227,7 @@ export default function AddRouteModal({
               <button
                 type="button"
                 onClick={handleSubmit}
-                disabled={!selectedSchool || !destination || isAdding}
+                disabled={!selectedSchool || !destination || Number(fare) <= 0 || isAdding}
                 className="flex-1 py-3 px-4 rounded-xl font-semibold bg-emerald-500 text-white hover:bg-emerald-600 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
               >
                 {isAdding ? (

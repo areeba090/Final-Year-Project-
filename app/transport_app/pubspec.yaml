@@ -44,6 +44,8 @@ dependencies:
   flutter_local_notifications: ^17.2.1
   http: ^1.2.0
   google_polyline_algorithm: ^3.1.0
+  flutter_stripe: ^11.5.0
+  flutter_stripe_web: ^6.0.0
 
 
   # The following adds the Cupertino Icons font to your application.

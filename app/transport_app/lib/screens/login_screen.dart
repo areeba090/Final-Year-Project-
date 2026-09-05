@@ -6,8 +6,6 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import '../theme/app_theme.dart';
 
 import 'signup_screen.dart';
-import 'driver_dashboard.dart';
-import 'parent_dashboard.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -46,72 +44,20 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() => _isLoading = true);
 
     try {
-      UserCredential cred = await FirebaseAuth.instance
-          .signInWithEmailAndPassword(email: email, password: password);
-
-      User? user = cred.user;
-      if (user == null) throw FirebaseAuthException(code: "user-null");
-
-      // Fetch Firestore
-      final userDoc = await FirebaseFirestore.instance
-          .collection("users")
-          .doc(user.uid)
-          .get();
-
-      if (!userDoc.exists) throw FirebaseAuthException(code: "not-found");
-
-      final data = userDoc.data()!;
-      final role = (data["role"] ?? "").toString().toLowerCase();
-      final status = (data["status"] ?? "").toString().toLowerCase();
-
-      // -------------------- ADMIN / SUPERADMIN --------------------
-      if (role == "admin" || role == "superadmin") {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Admin panel is web-only. Use the web dashboard.")),
-        );
-        await FirebaseAuth.instance.signOut();
-        return;
-      }
-
-      // -------------------- DRIVER --------------------
-      if (role == "driver") {
-        if (status != "active") {
-          throw FirebaseAuthException(code: "driver-pending");
-        }
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const DriverDashboard()),
-        );
-        return;
-      }
-
-      // -------------------- PARENT --------------------
-      if (role == "parent") {
-        if (!user.emailVerified) {
-          await user.sendEmailVerification();
-          throw FirebaseAuthException(code: "email-not-verified");
-        }
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const ParentDashboard()),
-        );
-        return;
-      }
-
-      throw FirebaseAuthException(code: "role-error");
+      UserCredential cred = await FirebaseAuth.instance.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+      if (cred.user == null) throw FirebaseAuthException(code: "user-null");
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(cred.user!.uid)
+          .get(const GetOptions(source: Source.server));
 
     } on FirebaseAuthException catch (e) {
       String msg = "Login failed.";
 
-      if (e.code == "email-not-verified") {
-        msg = "Verify email first. Link sent again.";
-      } else if (e.code == "driver-pending") {
-        msg = "Admin has not approved your profile yet.";
-      } else if (e.code == "not-found") {
-        msg = "User not found in database.";
-      } else if (e.code == "role-error") {
-        msg = "Unauthorized role.";
-      } else if (e.code == "user-null") {
+      if (e.code == "user-null") {
         msg = "User not found.";
       } else {
         msg = "Incorrect email or password.";
