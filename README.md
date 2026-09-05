@@ -804,7 +804,7 @@ flutter run --dart-define=TRANSPORT_API_BASE_URL=http://<YOUR_LOCAL_IP>:8000
 
 ### Academic Information
 - **Project Title**: Pick-and-Drop Management System
-- **Degree Program**: Bachelor of Science in Computer Science / Software Engineering (BSCS / BSSE)
+- **Degree Program**: Bachelor of Science in Software Engineering (BSSE)
 - **Course**: Final Year Project (FYP)
 
 ### Project Contributors & Team Members
@@ -812,7 +812,7 @@ flutter run --dart-define=TRANSPORT_API_BASE_URL=http://<YOUR_LOCAL_IP>:8000
 - **Student 2**: Aiman Shabbir (Lead Frontend & Database Architect)
 
 ### Project Supervisor
-- **Project Supervisor / Advisor**: Department Faculty Advisor
+- **Project Supervisor / Advisor**: Dr Abdul Nasir khan
 
 ---
 
