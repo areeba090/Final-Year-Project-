@@ -2,7 +2,7 @@
 
 > **A Comprehensive Multi-Platform Smart School Transport Management, Real-Time GPS Tracking, Cashless Payments, and AI Sentiment-Driven Evaluation System.**
 >
-> Final Year Project (FYP) — Department of Computer Science / Software Engineering.
+> Final Year Project (FYP) — Department of Software Engineering.
 
 ---
 
@@ -808,8 +808,8 @@ flutter run --dart-define=TRANSPORT_API_BASE_URL=http://<YOUR_LOCAL_IP>:8000
 - **Course**: Final Year Project (FYP)
 
 ### Project Contributors & Team Members
-- **Student 1**: Soban Rauf (Lead Mobile & Backend Developer)
-- **Student 2**: Areeba Khan (Lead Frontend & Database Architect)
+- **Student 1**: Areeba khan (Lead Mobile & Backend Developer)
+- **Student 2**: Aiman Shabbir (Lead Frontend & Database Architect)
 
 ### Project Supervisor
 - **Project Supervisor / Advisor**: Department Faculty Advisor
@@ -818,3 +818,4 @@ flutter run --dart-define=TRANSPORT_API_BASE_URL=http://<YOUR_LOCAL_IP>:8000
 
 ## 📄 License & Intellectual Property
 This project was designed and developed as an undergraduate Final Year Project (FYP). All rights reserved by the project authors and institution. Unauthorized commercial reproduction or redistribution is prohibited.
+
