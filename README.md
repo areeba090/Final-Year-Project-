@@ -2,7 +2,7 @@
 
 > **A Comprehensive Multi-Platform Smart School Transport Management, Real-Time GPS Tracking, Cashless Payments, and AI Sentiment-Driven Evaluation System.**
 >
-> Final Year Project (FYP) — Department of Computer Science / Software Engineering.
+> Final Year Project (FYP) — Department of Software Engineering.
 
 ---
 
